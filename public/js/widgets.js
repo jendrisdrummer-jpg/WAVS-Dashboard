@@ -5,16 +5,16 @@
 // once a second (for clocks / countdowns), so it must be cheap: build HTML and hand it to setHTML(),
 // which only touches the DOM when something changed.
 //
-// Option field types: text | textarea | number | checkbox | select (choices: () => [[value, label]]) | mics
+// Option field types: text | textarea | number | checkbox | select (choices: () => [[value, label]])
+//                     multi (several of choices) | mics. An option's `group` puts it under a heading.
+// `presets` (optional) adds ready-made variants of a widget to the Add widget panel.
 import {
-  store, esc, setHTML, api, toast, fmtDuration, avatar, micView, battery, meterRows, applyMeters,
-  STATUS_LABEL, KIND_ICON,
+  store, esc, setHTML, api, toast, fmtDuration, micView, applyMeters,
 } from './common.js';
 import { buildTile } from './video.js';
 import { spacingConflicts, drawSpectrum, rfRows } from './views.js';
-import { micCard } from './micstrip.js';
 import { planTiming, currentInfo, serviceClock } from './plan.js';
-import { mountMicBoard } from './micboard.js';
+import { mountMicView, MIC_OPTIONS } from './micviews.js';
 
 const switcherChoices = () => [['', '— none —'], ...store.config.switchers.map((s) => [s.id, s.name])];
 const ppChoices = () => store.config.propresenter.map((p) => [p.id, p.name]);
@@ -289,30 +289,20 @@ export const WIDGETS = {
   // ------------------------------------------------------------------ audio / rf
   mics: {
     title: 'Mics & gear', icon: '🎤', category: 'Audio & RF', size: { w: 8, h: 6 },
-    options: [
-      { key: 'layout', label: 'Layout', type: 'select', choices: () => [['board', 'Board: tall photo columns with RF graph'], ['cards', 'Cards with photos'], ['strip', 'Compact strip']] },
-      { key: 'assignedOnly', label: 'Only mics assigned to someone', type: 'checkbox' },
-      { key: 'handoff', label: 'Show Picked up / On stage / Returned buttons (board)', type: 'checkbox' },
-      { key: 'mics', label: 'Mics (none ticked = all)', type: 'mics' },
+    options: MIC_OPTIONS,
+    // Ready-made versions listed separately in the Add widget panel; all are fully adjustable after.
+    presets: [
+      { name: 'Mic board (full screen)', icon: '🎤', size: { w: 9, h: 10 }, options: { layout: 'board', title: 'Who has which mic' } },
+      { name: 'Mic board (compact)', icon: '🎙️', size: { w: 6, h: 5 }, options: { layout: 'board', role: false, details: false, graph: 'rf', seconds: '20' } },
+      { name: 'Mic rows (side panel)', icon: '📶', size: { w: 3, h: 6 }, options: { layout: 'rows', details: false } },
+      { name: 'Mic cards', icon: '🪪', size: { w: 8, h: 5 }, options: { layout: 'cards', levels: 'meters' } },
+      { name: 'Photo tiles', icon: '🖼️', size: { w: 6, h: 5 }, options: { layout: 'tiles', levels: 'none', details: false } },
+      { name: 'Mic strip (bottom bar)', icon: '➖', size: { w: 12, h: 3 }, options: { layout: 'strip', levels: 'meters' } },
+      { name: 'Mics in use', icon: '🔴', size: { w: 6, h: 5 }, options: { layout: 'tiles', show: 'in-use', sort: 'status', levels: 'graph', graph: 'rf' } },
     ],
     mount(body, opts) {
-      const list = () => store.slots.filter((s) => !s.hidden
-        && (!opts.mics?.length || opts.mics.includes(s.id))
-        && (!opts.assignedOnly || (store.greenroom.assignments[s.id] && store.greenroom.assignments[s.id].status !== 'returned')));
-      if (opts.layout === 'board') {
-        body.classList.add('flush');
-        return mountMicBoard(body, { getSlots: list, handoff: () => Boolean(opts.handoff) });
-      }
-      return {
-        update() {
-          const slots = list();
-          const html = !slots.length ? empty(opts.assignedOnly ? 'Nobody is assigned a mic yet' : 'No mics configured')
-            : opts.layout === 'strip' ? `<div class="strip">${slots.map(micCard).join('')}</div>`
-              : `<div class="gear">${slots.map(gearCard).join('')}</div>`;
-          if (setHTML(body, html)) applyMeters(body);
-        },
-        meters: () => applyMeters(body),
-      };
+      body.classList.add('flush');
+      return mountMicView(body, opts);
     },
   },
 
@@ -467,24 +457,6 @@ export const WIDGETS = {
 };
 
 export const CATEGORIES = ['Service', 'Video', 'Switcher', 'Slides', 'Audio & RF', 'Team'];
-
-/** MxU-style gear assignment card: photo, person, mic, battery %, RF bars. */
-function gearCard(slot) {
-  const { mic, a, person, txOn, alerting } = micView(slot);
-  const rfBars = !txOn ? 0 : mic.rfDbm > -60 ? 4 : mic.rfDbm > -70 ? 3 : mic.rfDbm > -80 ? 2 : 1;
-  const rfWord = ['Off', 'Weak', 'Fair', 'Good', 'Strong'][rfBars];
-  return `<div class="gc ${a ? `status-${a.status}` : ''} ${alerting ? 'alerting' : ''} ${txOn ? '' : 'off'}" data-mid="${esc(slot.id)}">
-    ${a ? `<span class="status-pill ${a.status}">${STATUS_LABEL[a.status]}</span>` : '<span class="status-pill">Spare</span>'}
-    <div class="gc-who"><b>${esc(person?.name || slot.label)}</b><span class="muted">${esc(person?.role || (person ? '' : 'Unassigned'))}</span></div>
-    ${avatar(person, 'avatar gc-photo')}
-    <div class="gc-mic"><span class="muted small">${KIND_ICON[slot.kind] || ''} ${esc(slot.receiverName)}</span><b>${esc(slot.label)}</b></div>
-    <div class="gc-stats">
-      ${!mic.online ? '<span class="txoff">RX OFFLINE</span>' : txOn ? battery(mic) : '<span class="txoff">TX OFF</span>'}
-      <span class="rfbars b${rfBars}" title="RF ${rfWord}${txOn && mic.rfDbm != null ? ` (${mic.rfDbm} dBm)` : ''}"><i></i><i></i><i></i><i></i></span><span class="muted small">${rfWord}</span>
-    </div>
-    <div class="meters">${meterRows(slot)}</div>
-  </div>`;
-}
 
 /** Very small, safe formatter for notes: # heading, - bullets, ! highlight, links. */
 function formatNote(text) {

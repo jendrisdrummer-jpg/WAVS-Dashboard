@@ -1,7 +1,7 @@
 import { start, store, onRender, onMeters, applyMeters, api, toast } from './common.js';
 import { greenroomCard } from './views.js';
 import { visibleSlots } from './micstrip.js';
-import { mountMicBoard } from './micboard.js';
+import { mountMicView } from './micviews.js';
 
 await start({ page: 'greenroom' });
 
@@ -11,7 +11,7 @@ const params = new URLSearchParams(location.search);
 const toggle = document.getElementById('handoff');
 let handoff = params.get('handoff') === '1';
 toggle.checked = handoff;
-toggle.onchange = () => { handoff = toggle.checked; last = ''; render(); };
+toggle.onchange = () => { handoff = toggle.checked; last = ''; mountBoard(); render(); };
 const filterSel = document.getElementById('filter');
 filterSel.value = params.get('show') || 'assigned';
 filterSel.onchange = () => { last = ''; render(); };
@@ -22,8 +22,17 @@ viewSel.value = params.get('view') === 'cards' ? 'cards' : 'board';
 viewSel.onchange = () => { last = ''; render(); };
 
 const grid = document.getElementById('gr');
-const boardEl = document.getElementById('board');
-const board = mountMicBoard(boardEl, { getSlots: () => shown(), handoff: () => handoff });
+let boardEl = document.getElementById('board');
+let board;
+function mountBoard() {
+  board?.destroy();
+  const fresh = boardEl.cloneNode(false);
+  fresh.className = 'gr-board';
+  boardEl.replaceWith(fresh);
+  boardEl = fresh;
+  board = mountMicView(boardEl, { layout: 'board', handoff }, { getSlots: () => shown() });
+}
+mountBoard();
 let last = '';
 
 function shown() {

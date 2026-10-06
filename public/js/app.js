@@ -77,15 +77,23 @@ function addWidget(def) {
   return el;
 }
 
+/** Settings every widget has, whatever its type. */
+const COMMON_OPTIONS = [
+  { key: 'title', label: 'Title', type: 'text', group: 'Widget' },
+  { key: 'hideTitle', label: 'Hide the title bar', type: 'checkbox', group: 'Widget' },
+  { key: 'zoom', label: 'Content size', type: 'select', group: 'Widget', default: '100', choices: () => [['75', 'Small (75%)'], ['90', '90%'], ['100', 'Normal'], ['115', '115%'], ['130', 'Large (130%)'], ['150', 'Extra large (150%)']] },
+];
+
 function mount(entry, content) {
   const widget = WIDGETS[entry.def.type];
   const opts = { ...defaultsFor(entry.def.type), ...entry.def.options };
-  content.innerHTML = `<div class="w ${widget?.chrome === false ? 'nochrome' : ''}">
+  content.innerHTML = `<div class="w ${widget?.chrome === false ? 'nochrome' : ''} ${opts.hideTitle ? 'notitle' : ''}">
     <div class="whead"><span class="wtitle">${esc(opts.title || widget?.title || entry.def.type)}</span>
       <span class="wactions"></span>
       <span class="wedit"><button data-act="settings" title="Settings">⚙</button><button data-act="remove" title="Remove">✕</button></span></div>
     <div class="wbody"></div></div>`;
   const body = content.querySelector('.wbody');
+  if (opts.zoom && opts.zoom !== '100') body.style.zoom = Number(opts.zoom) / 100;
   const actions = content.querySelector('.wactions');
   const ctx = {
     editing: () => editing,
@@ -110,7 +118,8 @@ function mount(entry, content) {
 
 function defaultsFor(type) {
   const out = {};
-  for (const o of WIDGETS[type]?.options || []) {
+  for (const o of [...COMMON_OPTIONS, ...(WIDGETS[type]?.options || [])]) {
+    if (o.key === 'title') continue;
     if (o.default !== undefined) out[o.key] = o.default;
     else if (o.type === 'select' && o.choices) out[o.key] = o.choices()[0]?.[0] ?? '';
   }
@@ -134,35 +143,48 @@ gridEl.addEventListener('click', (e) => {
 const dlg = document.getElementById('settings');
 const fieldsEl = document.getElementById('settings-fields');
 
+function field(f, v) {
+  const id = `f-${f.key}`;
+  switch (f.type) {
+    case 'checkbox':
+      return `<label class="cb"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    case 'select':
+      return `<label>${esc(f.label)}<select id="${id}">${f.choices().map(([val, lab]) => `<option value="${esc(val)}" ${String(v ?? '') === String(val) ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select></label>`;
+    case 'multi':
+      return `<div class="dlg-multi"><span>${esc(f.label)}</span><div class="mic-picks">${f.choices().map(([val, lab]) => `
+        <label class="cb"><input type="checkbox" data-multi="${esc(f.key)}" value="${esc(val)}" ${(v || []).includes(val) ? 'checked' : ''}> ${esc(lab)}</label>`).join('')}</div></div>`;
+    case 'textarea':
+      return `<label>${esc(f.label)}<textarea id="${id}" rows="4">${esc(v ?? '')}</textarea></label>`;
+    case 'number':
+      return `<label>${esc(f.label)}<input type="number" id="${id}" value="${esc(v ?? '')}"></label>`;
+    case 'mics':
+      return `<div class="dlg-multi"><span>${esc(f.label)}</span><div class="mic-picks">${store.slots.map((s) => `
+        <label class="cb"><input type="checkbox" data-multi="${esc(f.key)}" value="${esc(s.id)}" ${(v || []).includes(s.id) ? 'checked' : ''}> ${esc(s.label)} <span class="muted small">${esc(s.receiverName)}</span></label>`).join('')}</div></div>`;
+    default:
+      return `<label>${esc(f.label)}<input type="text" id="${id}" value="${esc(v ?? '')}" placeholder="${esc(f.placeholder || '')}"></label>`;
+  }
+}
+
 function openSettings(entry) {
   const widget = entry.widget;
   const opts = { ...defaultsFor(entry.def.type), ...entry.def.options };
   document.getElementById('settings-title').textContent = `${widget?.title || entry.def.type} settings`;
-  const fields = [{ key: 'title', label: 'Title', type: 'text', placeholder: widget?.title }, ...(widget?.options || [])];
-  fieldsEl.innerHTML = fields.map((f) => {
-    const v = opts[f.key];
-    const id = `f-${f.key}`;
-    switch (f.type) {
-      case 'checkbox':
-        return `<label class="cb"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> ${esc(f.label)}</label>`;
-      case 'select':
-        return `<label>${esc(f.label)}<select id="${id}">${f.choices().map(([val, lab]) => `<option value="${esc(val)}" ${String(v ?? '') === String(val) ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select></label>`;
-      case 'textarea':
-        return `<label>${esc(f.label)}<textarea id="${id}" rows="4">${esc(v ?? '')}</textarea></label>`;
-      case 'number':
-        return `<label>${esc(f.label)}<input type="number" id="${id}" value="${esc(v ?? '')}"></label>`;
-      case 'mics':
-        return `<fieldset><legend>${esc(f.label)}</legend><div class="mic-picks">${store.slots.map((s) => `
-          <label class="cb"><input type="checkbox" data-mic="${esc(s.id)}" ${(v || []).includes(s.id) ? 'checked' : ''}> ${esc(s.label)} <span class="muted small">${esc(s.receiverName)}</span></label>`).join('')}</div></fieldset>`;
-      default:
-        return `<label>${esc(f.label)}<input type="text" id="${id}" value="${esc(v ?? '')}" placeholder="${esc(f.placeholder || '')}"></label>`;
-    }
-  }).join('');
+  const fields = [
+    ...COMMON_OPTIONS.map((f) => (f.key === 'title' ? { ...f, placeholder: widget?.title } : f)),
+    ...(widget?.options || []).map((f) => ({ group: 'Settings', ...f })),
+  ];
+  // Fields are shown in sections, one per `group`, in the order the groups first appear.
+  const groups = [...new Set(fields.map((f) => f.group))];
+  fieldsEl.innerHTML = groups.map((g) => `<fieldset class="dlg-group"><legend>${esc(g)}</legend>
+    ${fields.filter((f) => f.group === g).map((f) => field(f, opts[f.key])).join('')}</fieldset>`).join('');
   dlg.onclose = () => {
     if (dlg.returnValue !== 'ok') return;
     const next = {};
     for (const f of fields) {
-      if (f.type === 'mics') { next[f.key] = [...fieldsEl.querySelectorAll('[data-mic]:checked')].map((c) => c.dataset.mic); continue; }
+      if (f.type === 'multi' || f.type === 'mics') {
+        next[f.key] = [...fieldsEl.querySelectorAll(`[data-multi="${CSS.escape(f.key)}"]:checked`)].map((c) => c.value);
+        continue;
+      }
       const input = fieldsEl.querySelector(`#f-${f.key}`);
       next[f.key] = f.type === 'checkbox' ? input.checked : f.type === 'number' ? Number(input.value) : input.value;
     }
@@ -177,16 +199,20 @@ function openSettings(entry) {
 
 // ---------------------------------------------------------------- palette (edit mode)
 
+// Widgets with presets are listed once per preset (e.g. "Mic board", "Mic rows", "Photo tiles").
 document.getElementById('pal-list').innerHTML = CATEGORIES.map((cat) => `
   <div class="pal-cat">${esc(cat)}</div>
-  ${Object.entries(WIDGETS).filter(([, w]) => w.category === cat).map(([type, w]) => `
-    <button class="pal-item" data-type="${type}"><span>${w.icon}</span>${esc(w.title)}</button>`).join('')}`).join('');
+  ${Object.entries(WIDGETS).filter(([, w]) => w.category === cat).map(([type, w]) => (w.presets
+    ? w.presets.map((p, i) => `<button class="pal-item" data-type="${type}" data-preset="${i}"><span>${p.icon || w.icon}</span>${esc(p.name)}</button>`).join('')
+    : `<button class="pal-item" data-type="${type}"><span>${w.icon}</span>${esc(w.title)}</button>`)).join('')}`).join('');
 
 palette.addEventListener('click', (e) => {
   const b = e.target.closest('[data-type]');
   if (!b) return;
   const w = WIDGETS[b.dataset.type];
-  const def = { id: crypto.randomUUID(), type: b.dataset.type, w: Math.min(w.size.w, 12), h: w.size.h, options: {} };
+  const preset = b.dataset.preset != null ? w.presets[Number(b.dataset.preset)] : null;
+  const size = preset?.size || w.size;
+  const def = { id: crypto.randomUUID(), type: b.dataset.type, w: Math.min(size.w, 12), h: size.h, options: structuredClone(preset?.options || {}) };
   const el = addWidget(def);
   el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 });

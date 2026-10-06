@@ -1,5 +1,5 @@
 import { start, store, onRender, esc, avatar, micView, api, toast, STATUS_LABEL, KIND_ICON, battery } from './common.js';
-import { colorFor } from './micboard.js';
+import { colorFor } from './micviews.js';
 
 await start({ page: 'admin' });
 

@@ -24,7 +24,7 @@ export function defaultDashboards(cfg) {
       w('video', 0, 5, 5, 4, { source: mv }),
       w('alerts', 5, 5, 4, 2),
       w('notes', 5, 7, 4, 2, { name: 'producer', title: 'Producer notes' }),
-      w('mics', 0, 9, 9, 3, { layout: 'strip' }),
+      w('mics', 0, 9, 9, 3, { layout: 'strip', levels: 'meters' }),
     ]),
     board('Video Director', [
       w('video', 0, 0, 6, 6, { source: pgm, switcher: sw }),
@@ -36,7 +36,7 @@ export function defaultDashboards(cfg) {
       w('alerts', 9, 9, 3, 3),
     ]),
     board('Audio & RF', [
-      w('mics', 0, 0, 8, 7, { layout: 'cards' }),
+      w('mics', 0, 0, 8, 7, { layout: 'cards', levels: 'meters' }),
       w('rf-plot', 8, 0, 4, 4),
       w('alerts', 8, 4, 4, 3),
       w('rf-table', 0, 7, 8, 5),
