@@ -6,12 +6,18 @@
   <title>Green Room</title>
   <link rel="stylesheet" href="/css/app.css">
 </head>
-<body>
+<body class="fit">
   <main class="gr-wrap">
     <div class="gr-head">
       <h1>Green Room</h1>
       <span class="muted" id="count"></span>
       <span style="flex:1"></span>
+      <label class="chip" style="font-size:13px;padding:6px 10px">View
+        <select id="view" style="padding:2px 6px">
+          <option value="board">Board</option>
+          <option value="cards">Cards</option>
+        </select>
+      </label>
       <label class="chip" style="font-size:13px;padding:6px 10px">Show
         <select id="filter" style="padding:2px 6px">
           <option value="assigned">Assigned mics</option>
@@ -24,6 +30,7 @@
       </label>
     </div>
     <section class="gr" id="gr" aria-label="Mic assignments"></section>
+    <section id="board" class="gr-board hidden" aria-label="Mic board"></section>
   </main>
   <script type="module" src="/js/greenroom.js"></script>
 </body>

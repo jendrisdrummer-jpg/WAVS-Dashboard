@@ -1,4 +1,5 @@
 import { start, store, onRender, esc, avatar, micView, api, toast, STATUS_LABEL, KIND_ICON, battery } from './common.js';
+import { colorFor } from './micboard.js';
 
 await start({ page: 'admin' });
 
@@ -123,6 +124,13 @@ peopleEl.addEventListener('click', async (e) => {
 
 // Photo replace: hidden file input per person
 peopleEl.addEventListener('change', async (e) => {
+  const swatch = e.target.closest('input[type=color][data-color]');
+  if (swatch) {
+    const fd = new FormData();
+    fd.set('color', swatch.value);
+    try { await api('PUT', `/api/people/${swatch.dataset.color}`, fd); } catch (err) { toast(err.message, true); }
+    return;
+  }
   const input = e.target.closest('input[type=file][data-id]');
   if (!input?.files[0]) return;
   const fd = new FormData();
@@ -178,6 +186,7 @@ function render() {
       </div>
       <div class="acts">
         <label class="btn small" style="cursor:pointer">📷 Photo<input type="file" accept="image/*" data-id="${p.id}" hidden></label>
+        <label class="btn small swatch" title="Colour behind their photo on the mic board"><input type="color" data-color="${p.id}" value="${colorFor(p, { id: p.id })}"></label>
         <button class="btn small" data-act="edit" data-id="${p.id}">Edit</button>
         ${p.photo ? `<button class="btn small" data-act="remove-photo" data-id="${p.id}">No photo</button>` : ''}
         <button class="btn small danger" data-act="delete" data-id="${p.id}">Remove</button>

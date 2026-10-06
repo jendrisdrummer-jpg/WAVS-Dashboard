@@ -14,6 +14,7 @@ import { buildTile } from './video.js';
 import { spacingConflicts, drawSpectrum, rfRows } from './views.js';
 import { micCard } from './micstrip.js';
 import { planTiming, currentInfo, serviceClock } from './plan.js';
+import { mountMicBoard } from './micboard.js';
 
 const switcherChoices = () => [['', '— none —'], ...store.config.switchers.map((s) => [s.id, s.name])];
 const ppChoices = () => store.config.propresenter.map((p) => [p.id, p.name]);
@@ -287,16 +288,21 @@ export const WIDGETS = {
 
   // ------------------------------------------------------------------ audio / rf
   mics: {
-    title: 'Mics & gear', icon: '🎤', category: 'Audio & RF', size: { w: 8, h: 4 },
+    title: 'Mics & gear', icon: '🎤', category: 'Audio & RF', size: { w: 8, h: 6 },
     options: [
-      { key: 'layout', label: 'Layout', type: 'select', choices: () => [['cards', 'Cards with photos'], ['strip', 'Compact strip']] },
+      { key: 'layout', label: 'Layout', type: 'select', choices: () => [['board', 'Board: tall photo columns with RF graph'], ['cards', 'Cards with photos'], ['strip', 'Compact strip']] },
       { key: 'assignedOnly', label: 'Only mics assigned to someone', type: 'checkbox' },
+      { key: 'handoff', label: 'Show Picked up / On stage / Returned buttons (board)', type: 'checkbox' },
       { key: 'mics', label: 'Mics (none ticked = all)', type: 'mics' },
     ],
     mount(body, opts) {
       const list = () => store.slots.filter((s) => !s.hidden
         && (!opts.mics?.length || opts.mics.includes(s.id))
         && (!opts.assignedOnly || (store.greenroom.assignments[s.id] && store.greenroom.assignments[s.id].status !== 'returned')));
+      if (opts.layout === 'board') {
+        body.classList.add('flush');
+        return mountMicBoard(body, { getSlots: list, handoff: () => Boolean(opts.handoff) });
+      }
       return {
         update() {
           const slots = list();

@@ -43,10 +43,10 @@ export function defaultDashboards(cfg) {
       w('checklist', 8, 7, 4, 5, { name: 'audio', title: 'Audio checklist' }),
     ]),
     board('Green Room TV', [
-      w('mics', 0, 0, 8, 12, { layout: 'cards', assignedOnly: true }),
-      w('clock', 8, 0, 4, 2),
-      w('current-item', 8, 2, 4, 4),
-      w('plan', 8, 6, 4, 6, { compact: true }),
+      w('mics', 0, 0, 9, 12, { layout: 'board', title: 'Who has which mic' }),
+      w('clock', 9, 0, 3, 2),
+      w('current-item', 9, 2, 3, 4),
+      w('plan', 9, 6, 3, 6, { compact: true }),
     ]),
   ];
 }
