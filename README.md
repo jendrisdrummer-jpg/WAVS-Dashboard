@@ -38,7 +38,7 @@ npm start
 | URL | What it is |
 |---|---|
 | `/` or `/d/<name>` | **Dashboards.** Pick one from the drop-down in the header. Each screen remembers the last one it showed. |
-| `/greenroom` | Big photo cards for the green room, with **Picked up / On stage / Returned** buttons (`?handoff=1` keeps them on). |
+| `/greenroom` | The **mic board**: one tall column per mic with the person's name, photo, battery and a live RF/audio graph, plus **Picked up / On stage / Returned** buttons (`?handoff=1` keeps them on, `?view=cards` for the older card view). |
 | `/rf` | Every receiver channel, plus a frequency plot that flags carriers spaced too closely. |
 | `/admin` | **Setup**: service plan (Planning Center or typed in), people and photos, mic assignments. |
 
@@ -69,8 +69,45 @@ Lobby TV or Campus 2. On phones, widgets stack into a single column.
 | Video | **Video feed** (capture card, WebRTC/WHEP, HLS, MJPEG, web page) with PGM/PVW tally overlay |
 | Switcher | **Program / Preview** for any M/E, **Switcher overview** (every M/E with keyers, DSKs, aux outputs, stream/record), **Camera tally** (red on air, green preview, per M/E or all) |
 | Slides | **ProPresenter** (live and next slide, groups, layers, screens, look, recording), **ProPresenter timers**, **Stage message** |
-| Audio & RF | **Mics & gear** (photo cards or compact strip, battery, RF, live meters), **RF & batteries** table, **Frequency plot** |
+| Audio & RF | **Mics & gear** in five looks (see below), **RF & batteries** table, **Frequency plot** |
 | Team | **Alerts**, **Notes** (shared live), **Checklist** (shared live, with sections and progress), **Text**, **Web page** (stream analytics, Resi, encoder status, Companion…) |
+
+### Mic board
+The **Green Room TV** dashboard and `/greenroom` show one column per mic:
+- **Who:** the person's first name in large type, then their surname and role, with their photo
+  on a coloured glow. You can pick each person's colour on the Setup page (🎨 next to their photo),
+  otherwise one is picked automatically.
+- **Which mic:** the mic label and its status (Assigned, Picked up, On stage).
+- **Health:** battery in the corner, plus a rolling graph across the bottom. The bars are RF
+  signal (green, or amber when weak) and the white line is audio, so you can see who's talking.
+- **Problems:** the whole column turns red and pulses if a mic in use loses signal or its receiver
+  goes offline.
+
+Cut-out photos (PNG with a transparent background) look best, because the colour shows around them.
+
+### Mics & gear: pick a look per dashboard
+The Add widget panel offers ready-made versions:
+
+| Version | Good for |
+|---|---|
+| Mic board (full screen) | Green room TV: tall photo columns with a rolling RF/audio graph |
+| Mic board (compact) | Half a screen: no role or numbers, 20-second RF graph |
+| Mic rows (side panel) | A narrow column beside video or the plan: one line per mic with a graph |
+| Mic cards | Round photo, battery, RF strength and live meters |
+| Photo tiles | Photo-first grid with the name over the picture |
+| Mic strip (bottom bar) | A thin row along the bottom of a production dashboard |
+| Mics in use | Only people who've picked up a mic or are on stage, on-stage first |
+
+![Every mic look on one dashboard](docs/mic-looks.jpg)
+
+Every version can be changed afterwards with ⚙:
+- **Layout:** look, number of columns, whether photos are cropped to fill or shown whole (best for cut-outs).
+- **Filter & order:** all mics, assigned only, or in use only; certain mic types (handhelds, headsets, lavs…) or specific mics; rack order, on-stage first, or by name.
+- **Show:** photo, surname and role, mic label, hand-off status, battery, frequency and signal numbers, hand-off buttons.
+- **Signal:** a rolling graph (RF and audio, RF only or audio only; 20, 40 or 60 seconds), live meter bars, or nothing; and whether a mic in use that loses signal flashes red.
+
+Every widget also has **Hide the title bar** and **Content size** (75–150%), so you can fit more on a
+small screen or make a TV readable from across the room.
 
 Notes and checklists are shared by name. Two widgets set to the same name, even on different
 dashboards, show and edit the same note.

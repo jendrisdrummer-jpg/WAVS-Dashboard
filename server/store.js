@@ -3,6 +3,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
+/** The colour behind a person's photo on the mic board ("#7c3aed"), or null for automatic. */
+const cleanColor = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : null);
+
 export const STATUSES = ['assigned', 'picked-up', 'on-stage', 'returned'];
 
 /**
@@ -33,9 +36,9 @@ export class GreenroomStore extends EventEmitter {
 
   person(id) { return this.data.people.find((p) => p.id === id); }
 
-  addPerson({ name, role = '', notes = '', photo = null }) {
+  addPerson({ name, role = '', notes = '', photo = null, color = null }) {
     if (!name?.trim()) throw new Error('Name is required');
-    const p = { id: crypto.randomUUID(), name: name.trim(), role: role.trim(), notes: notes.trim(), photo };
+    const p = { id: crypto.randomUUID(), name: name.trim(), role: role.trim(), notes: notes.trim(), photo, color: cleanColor(color) };
     this.data.people.push(p);
     this.save();
     return p;
@@ -45,6 +48,7 @@ export class GreenroomStore extends EventEmitter {
     const p = this.person(id);
     if (!p) throw new Error('Person not found');
     for (const k of ['name', 'role', 'notes']) if (typeof fields[k] === 'string') p[k] = fields[k].trim();
+    if (typeof fields.color === 'string') p.color = cleanColor(fields.color);
     if (fields.photo !== undefined) {
       if (p.photo && p.photo !== fields.photo) this.deletePhoto(p.photo);
       p.photo = fields.photo;
