@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Green Room</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="gr-wrap">
+    <div class="gr-head">
+      <h1>Green Room</h1>
+      <span class="muted" id="count"></span>
+      <span style="flex:1"></span>
+      <label class="chip" style="font-size:13px;padding:6px 10px">Show
+        <select id="filter" style="padding:2px 6px">
+          <option value="assigned">Assigned mics</option>
+          <option value="out">Out (picked up / on stage)</option>
+          <option value="all">All mics</option>
+        </select>
+      </label>
+      <label class="chip" style="font-size:13px;padding:6px 10px;cursor:pointer">
+        <input type="checkbox" id="handoff"> Hand-off buttons
+      </label>
+    </div>
+    <section class="gr" id="gr" aria-label="Mic assignments"></section>
+  </main>
+  <script type="module" src="/js/greenroom.js"></script>
+</body>
+</html>

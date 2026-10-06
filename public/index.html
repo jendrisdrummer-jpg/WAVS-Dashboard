@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Production Dashboard</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="fit">
+  <main class="dash">
+    <section class="tiles" id="tiles" aria-label="Video feeds"></section>
+    <aside class="side">
+      <div class="panel"><h2>On air</h2><div class="panel-body" id="onair"></div></div>
+      <div class="panel"><h2>Alerts</h2><div class="panel-body list" id="alerts"></div></div>
+      <div class="panel"><h2>ProPresenter</h2><div class="panel-body list" id="pplist"></div></div>
+      <div class="panel hidden" id="stage">
+        <h2>Stage message</h2>
+        <form class="panel-body" style="display:grid;gap:8px">
+          <select name="pp" aria-label="ProPresenter machine"></select>
+          <input type="text" name="text" placeholder="e.g. 5 minutes – wrap up" maxlength="300" aria-label="Message">
+          <div style="display:flex;gap:6px">
+            <button class="btn primary" type="submit">Send</button>
+            <button class="btn" type="submit" data-clear="1">Clear</button>
+          </div>
+        </form>
+      </div>
+    </aside>
+    <section class="strip" id="strip" aria-label="Wireless microphones"></section>
+  </main>
+  <script type="module" src="/js/dashboard.js"></script>
+</body>
+</html>

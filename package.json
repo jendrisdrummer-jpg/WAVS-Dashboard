@@ -1,0 +1,27 @@
+{
+  "name": "wavs-dashboard",
+  "version": "0.1.0",
+  "description": "Self-hosted production dashboard for live events and church services: ProPresenter, switcher program/multiview feeds, wireless mic RF/battery monitoring and a green room view.",
+  "private": true,
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "demo": "WAVS_CONFIG=config/demo.yaml node server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "hls.js": "^1.6.0",
+    "multer": "^2.0.0",
+    "ws": "^8.18.0",
+    "yaml": "^2.8.0"
+  },
+  "optionalDependencies": {
+    "atem-connection": "^3.10.0"
+  }
+}

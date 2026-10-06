@@ -1,0 +1,112 @@
+# WAVS Dashboard configuration
+# Copy to config/config.yaml and edit for your building. Restart the server after changes.
+# Any device can use `type: simulator` while you set things up.
+
+server:
+  port: 8080
+
+org:
+  name: "Your Church"
+  serviceName: "Sunday 9:00"          # default; can be changed live from /admin
+  logo: null                          # e.g. config/logo.png (shown in the header)
+  theme:
+    accent: "#3b82f6"
+    background: "#0b0f17"
+    panel: "#131a26"
+
+security:
+  adminPin: null                      # set e.g. "4321" to require a PIN for edits (people, assignments, stage messages)
+
+alerts:
+  batteryBars: 1                      # warn at or below this many bars (0-5)
+  batteryMinutes: 30                  # warn at or below this runtime, when the transmitter reports it
+  rfLowDbm: -90                       # warn when an in-use mic's RF is weaker than this
+  audioClipDbfs: -2
+  sound: true                         # chime in the browser for new critical alerts
+
+rf:
+  minSpacingKHz: 350                  # flags carriers closer than this on the /rf page
+
+# Optional remote actions. Everything else is read-only monitoring.
+control:
+  propresenterStageMessage: true      # send a message to the stage display from the dashboard
+  pushNamesToReceivers: false         # write the assigned person's first name to the receiver's channel name
+
+# ---------------------------------------------------------------- ProPresenter 7
+# ProPresenter > Settings > Network > Enable Network. Use the port shown there.
+propresenter:
+  - id: main
+    name: "ProPresenter – Main"
+    host: 192.168.1.20
+    port: 1025
+  # - id: stage
+  #   name: "ProPresenter – Lyrics/IMAG"
+  #   host: 192.168.1.21
+  #   port: 1025
+
+# ---------------------------------------------------------------- Switchers (tally)
+switchers:
+  - id: atem
+    name: "ATEM Main"
+    type: atem                        # atem | vmix | simulator
+    host: 192.168.1.240
+    me: 0                             # mix effect bus (0 = M/E 1)
+  # - id: vmix
+  #   name: "vMix Stream"
+  #   type: vmix
+  #   host: 192.168.1.50
+  #   port: 8088
+
+# ---------------------------------------------------------------- Video tiles
+# Tile types:
+#   capture  – a capture device on the computer running the browser (USB/Thunderbolt
+#              capture of the switcher's multiview or program HDMI/SDI out).
+#              `device` is part of the device's name, e.g. "UltraStudio", "Magewell", "Cam Link".
+#              Browsers only allow this on http://localhost or https.
+#   webrtc   – a WHEP URL (e.g. MediaMTX re-streaming SRT/RTMP/NDI with ~0.5s latency)
+#   hls      – an .m3u8 URL (higher latency, works everywhere)
+#   mjpeg    – an MJPEG or periodically refreshed JPEG snapshot URL
+#   iframe   – any web page (e.g. an encoder's status page)
+#   propresenter – live text + thumbnail of the current/next slide
+# size: 1 (normal), 2 (double width), "wide" (full row)
+video:
+  tiles:
+    - id: program
+      label: "Program"
+      type: capture
+      device: "UltraStudio"
+      switcher: atem                  # shows the on-air source name from this switcher
+      size: 2
+    - id: multiview
+      label: "ATEM Multiview"
+      type: webrtc
+      url: "http://192.168.1.10:8889/multiview/whep"
+      size: 2
+    - id: pp-main
+      label: "ProPresenter"
+      type: propresenter
+      propresenter: main
+
+# ---------------------------------------------------------------- Wireless mics
+# channels: a number, or a list of labels / { label, kind, color, hidden }
+# kind: handheld | lav | headset | iem | instrument
+mics:
+  receivers:
+    - id: ulxd-a
+      name: "ULX-D Rack A"
+      type: shure                     # shure (ULX-D, QLX-D, SLX-D, Axient Digital) | simulator
+      host: 192.168.1.101
+      meterRateMs: 200                # live RF/audio meter rate
+      nameLength: 8                   # ULX-D shows 8 characters
+      channels:
+        - { label: "HH 1", kind: handheld }
+        - { label: "HH 2", kind: handheld }
+        - { label: "HH 3", kind: handheld }
+        - { label: "Pastor HS", kind: headset }
+    - id: qlxd-b
+      name: "QLX-D Rack B"
+      type: shure
+      host: 192.168.1.102
+      channels:
+        - { label: "Lav 1", kind: lav }
+        - { label: "Lav 2", kind: lav }

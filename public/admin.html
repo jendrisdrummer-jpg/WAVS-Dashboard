@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>People &amp; Mics</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="page">
+    <div class="panel">
+      <h2>Service</h2>
+      <form class="panel-body grid" id="service">
+        <label>Service name <input type="text" name="sname" placeholder="e.g. Sunday 11:00 – Easter"></label>
+        <div style="display:flex;gap:8px">
+          <button class="btn primary" type="submit">Save</button>
+          <button class="btn danger" type="button" id="clear-all">Clear all assignments</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h2>Mic assignments</h2>
+      <div class="panel-body assign-grid" id="assign"></div>
+    </div>
+
+    <div class="panel">
+      <h2>People</h2>
+      <div class="panel-body" style="display:grid;gap:14px">
+        <form class="grid" id="add-person">
+          <label>Name <input type="text" name="name" required placeholder="Full name"></label>
+          <label>Role <input type="text" name="role" placeholder="Worship Leader, Host…"></label>
+          <label>Photo <input type="file" name="photo" accept="image/*"></label>
+          <button class="btn primary" type="submit">Add person</button>
+        </form>
+        <input type="search" id="search" placeholder="Search people…" aria-label="Search people" style="max-width:320px">
+        <div class="people" id="people"></div>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>
