@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboards</title>
+  <link rel="stylesheet" href="/vendor/gridstack.min.css">
+  <link rel="stylesheet" href="/css/app.css">
+  <script src="/vendor/gridstack-all.js"></script>
+</head>
+<body class="fit">
+  <main class="db-main">
+    <aside class="palette hidden" id="palette" aria-label="Add widget">
+      <div class="pal-head">Add widget <small class="muted">click to add, then drag &amp; resize</small></div>
+      <div id="pal-list"></div>
+    </aside>
+    <div class="db-wrap"><div class="grid-stack" id="grid"></div></div>
+  </main>
+
+  <dialog id="settings" class="dlg">
+    <form method="dialog" id="settings-form">
+      <h3 id="settings-title">Widget settings</h3>
+      <div id="settings-fields" class="dlg-fields"></div>
+      <div class="dlg-btns">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" value="ok">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

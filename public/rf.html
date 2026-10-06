@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RF &amp; Batteries</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="page">
+    <div class="panel">
+      <h2>Receivers</h2>
+      <div class="panel-body" id="receivers"></div>
+    </div>
+    <div class="panel">
+      <h2>Frequency plot <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">bar height = RF level · amber = closer than minimum spacing</span></h2>
+      <div class="panel-body"><svg class="spectrum" id="spectrum" role="img" aria-label="Carrier frequencies"></svg></div>
+    </div>
+    <div class="panel">
+      <h2>Channels</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Receiver</th><th>Mic</th><th>RX name</th><th>Person</th><th>TX</th><th>Freq (MHz)</th><th>G,Ch</th><th>RF / Audio</th><th>Battery</th><th>Flags</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="/js/rf.js"></script>
+</body>
+</html>

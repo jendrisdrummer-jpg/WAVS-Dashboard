@@ -1,0 +1,118 @@
+# WAVS Dashboard configuration
+# Copy to config/config.yaml and edit for your building. Restart the server after changes.
+# Any device can use `type: simulator` while you set things up.
+
+server:
+  port: 8080
+
+org:
+  name: "Your Church"
+  serviceName: "Sunday 9:00"          # default; can be changed live from /admin
+  logo: null                          # e.g. config/logo.png (shown in the header)
+  theme:
+    accent: "#3b82f6"
+    background: "#0b0f17"
+    panel: "#131a26"
+
+security:
+  adminPin: null                      # set e.g. "4321" to require a PIN for edits (people, assignments, stage messages)
+
+alerts:
+  batteryBars: 1                      # warn at or below this many bars (0-5)
+  batteryMinutes: 30                  # warn at or below this runtime, when the transmitter reports it
+  rfLowDbm: -90                       # warn when an in-use mic's RF is weaker than this
+  audioClipDbfs: -2
+  sound: true                         # chime in the browser for new critical alerts
+
+rf:
+  minSpacingKHz: 350                  # flags carriers closer than this on the /rf page
+
+# Optional remote actions. Everything else is read-only monitoring.
+control:
+  propresenterStageMessage: true      # send a message to the stage display from the dashboard
+  pushNamesToReceivers: false         # write the assigned person's first name to the receiver's channel name
+
+# ---------------------------------------------------------------- Planning Center Services
+# Create a Personal Access Token at https://api.planningcenteronline.com/oauth/applications
+# (or set PCO_APP_ID / PCO_SECRET environment variables instead of writing them here).
+# The next upcoming plan is picked automatically; choose another on the Setup page.
+# planningCenter:
+#   appId: "your-application-id"
+#   secret: "your-secret"
+#   serviceTypes: []                  # limit to these service type IDs (empty = all)
+
+service:
+  followProPresenter: true            # advance the plan when ProPresenter shows a song/presentation with a matching name
+
+# ---------------------------------------------------------------- ProPresenter 7
+# ProPresenter > Settings > Network > Enable Network. Use the port shown there.
+propresenter:
+  - id: main
+    name: "ProPresenter – Main"
+    host: 192.168.1.20
+    port: 1025
+  # - id: stage
+  #   name: "ProPresenter – Lyrics/IMAG"
+  #   host: 192.168.1.21
+  #   port: 1025
+
+# ---------------------------------------------------------------- Switchers (tally)
+switchers:
+  - id: atem
+    name: "ATEM Constellation"
+    type: atem                        # atem | vmix | simulator
+    host: 192.168.1.240
+    me: 1                             # default M/E for tally overlays (1 = M/E 1)
+    meNames: ["Program", "Stream", "IMAG", "Lobby"]
+    auxNames: { 1: "Stream", 2: "Record", 3: "IMAG L", 4: "IMAG R" }
+  # - id: vmix
+  #   name: "vMix Stream"
+  #   type: vmix
+  #   host: 192.168.1.50
+  #   port: 8088
+
+# ---------------------------------------------------------------- Video sources
+# Each source can be shown by any number of "Video feed" widgets on any dashboard.
+# Types:
+#   capture  – a capture device on the computer running the browser (USB/Thunderbolt
+#              capture of the switcher's multiview or program HDMI/SDI out).
+#              `device` is part of the device's name, e.g. "UltraStudio", "Magewell", "Cam Link".
+#              Browsers only allow this on http://localhost or https.
+#   webrtc   – a WHEP URL (e.g. MediaMTX re-streaming SRT/RTMP/NDI with ~0.5s latency)
+#   hls      – an .m3u8 URL (higher latency, works everywhere)
+#   mjpeg    – an MJPEG or periodically refreshed JPEG snapshot URL
+#   iframe   – any web page (e.g. an encoder's status page)
+video:
+  sources:
+    - id: program
+      label: "Program"
+      type: capture
+      device: "UltraStudio"
+      switcher: atem                  # default tally overlay (can be changed per widget)
+    - id: multiview
+      label: "ATEM Multiview"
+      type: webrtc
+      url: "http://192.168.1.10:8889/multiview/whep"
+
+# ---------------------------------------------------------------- Wireless mics
+# channels: a number, or a list of labels / { label, kind, color, hidden }
+# kind: handheld | lav | headset | iem | instrument
+mics:
+  receivers:
+    - id: slxd-a
+      name: "SLX-D Rack A"
+      type: shure                     # shure (SLX-D, ULX-D, QLX-D, Axient Digital) | simulator
+      model: SLXD4D                   # optional; detected from the receiver otherwise
+      host: 192.168.1.101
+      meterRateMs: 200                # live RF/audio meter rate (min 100)
+      nameLength: 8                   # characters written when pushing names to the receiver
+      channels:
+        - { label: "HH 1", kind: handheld }
+        - { label: "HH 2", kind: handheld }
+    - id: slxd-b
+      name: "SLX-D Rack B"
+      type: shure
+      host: 192.168.1.102
+      channels:
+        - { label: "Pastor HS", kind: headset }
+        - { label: "Lav 1", kind: lav }

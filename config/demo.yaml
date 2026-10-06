@@ -1,0 +1,50 @@
+# Demo configuration – every device is simulated. Run with: npm run demo
+org:
+  name: "WAVS Demo Church"
+  serviceName: "Sunday 9:00"
+
+control:
+  propresenterStageMessage: true
+  pushNamesToReceivers: true
+
+propresenter:
+  - id: main
+    name: "ProPresenter – Main"
+    type: simulator
+
+switchers:
+  - id: atem
+    name: "ATEM Constellation 4 M/E"
+    type: simulator
+    me: 1
+
+video:
+  sources:
+    - id: program
+      label: "Program"
+      type: capture
+      device: "UltraStudio"
+      switcher: atem
+    - id: multiview
+      label: "Multiview"
+      type: webrtc
+      url: "http://127.0.0.1:8889/multiview/whep"
+
+mics:
+  receivers:
+    - id: slxd-a
+      name: "SLX-D Rack A"
+      type: simulator
+      channels:
+        - { label: "HH 1", kind: handheld }
+        - { label: "HH 2", kind: handheld }
+        - { label: "HH 3", kind: handheld }
+        - { label: "HH 4", kind: handheld }
+    - id: slxd-b
+      name: "SLX-D Rack B"
+      type: simulator
+      channels:
+        - { label: "Pastor HS", kind: headset }
+        - { label: "Host HS", kind: headset }
+        - { label: "Lav 1", kind: lav }
+        - { label: "Lav 2", kind: lav }
