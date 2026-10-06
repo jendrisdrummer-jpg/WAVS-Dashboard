@@ -15,7 +15,7 @@ export class SimReceiver {
 
   start() {
     const { id, name, channels, baseMHz } = this.cfg;
-    this.hub.update('receivers', id, { name: name || id, type: 'simulator', model: this.cfg.model || 'ULXD4Q (sim)', online: true, error: null });
+    this.hub.update('receivers', id, { name: name || id, type: 'simulator', model: this.cfg.model || 'SLXD4D (sim)', online: true, error: null });
     for (let c = 1; c <= channels; c++) {
       const s = {
         on: Math.random() > 0.15,
@@ -31,7 +31,7 @@ export class SimReceiver {
         chanName: `CH ${c}`,
         freqMHz: Math.round((baseMHz + c * 0.725 + rand(0, 0.4)) * 40) / 40,
         groupChan: `${1 + (c % 3)},${c}`,
-        txType: s.on ? (c % 2 ? 'ULXD2' : 'ULXD1') : null,
+        txType: s.on ? (this.cfg.txTypes?.[c - 1] || 'SLXD2') : null,
         battBars: s.on ? s.batt : null,
         battMinutes: s.on ? s.mins : null,
         battType: 'LION',
@@ -46,11 +46,11 @@ export class SimReceiver {
   meters() {
     this.ch.forEach((s, i) => {
       const id = this.micIdFor(this.cfg.id, i + 1);
-      if (!s.on) { this.hub.meter(id, { rfDbm: -128, audioDbfs: -50, antenna: 'XX' }); return; }
+      if (!s.on) { this.hub.meter(id, { rfDbm: -120, audioDbfs: -120 }); return; }
       if (Math.random() < 0.03) s.talking = !s.talking;
       s.rf = Math.max(-100, Math.min(-35, s.rf + rand(-2, 2)));
       const level = s.talking ? rand(-28, -4) : rand(-50, -38);
-      this.hub.meter(id, { rfDbm: Math.round(s.rf), audioDbfs: Math.round(level), antenna: Math.random() > 0.5 ? 'AX' : 'XB' });
+      this.hub.meter(id, { rfDbm: Math.round(s.rf), audioDbfs: Math.round(level) });
     });
   }
 
@@ -61,7 +61,7 @@ export class SimReceiver {
       if (s.on) s.mins = Math.max(0, s.mins - 1);
       s.batt = Math.min(5, Math.ceil(s.mins / 80));
       this.hub.update('mics', id, {
-        txType: s.on ? this.hub.state.mics[id]?.txType || 'ULXD2' : null,
+        txType: s.on ? this.cfg.txTypes?.[i] || 'SLXD2' : null,
         battBars: s.on ? s.batt : null,
         battMinutes: s.on ? s.mins : null,
       });
@@ -123,21 +123,41 @@ export class SimProPresenter {
   stop() { clearInterval(this.timer); }
 }
 
+/** Simulated ATEM Constellation 4 M/E: four M/Es, aux outputs and keyers. */
 export class SimSwitcher {
-  constructor(cfg, hub) { this.cfg = cfg; this.hub = hub; }
+  constructor(cfg, hub) { this.cfg = { me: 1, meNames: [], auxNames: {}, ...cfg }; this.hub = hub; }
 
   start() {
-    const names = this.cfg.inputs || ['Wide', 'Pastor', 'Worship Lead', 'Keys', 'ProPresenter', 'Crowd'];
-    let pgm = 0;
-    let pvw = 1;
-    const push = () => this.hub.update('switchers', this.cfg.id, {
-      name: this.cfg.name || this.cfg.id, type: 'simulator', model: 'ATEM (sim)', online: true, error: null,
-      program: { input: pgm + 1, name: names[pgm] }, preview: { input: pvw + 1, name: names[pvw] },
-      ftb: false, streaming: true, recording: true,
-    });
+    const names = this.cfg.inputs || ['Wide', 'Pastor', 'Worship Lead', 'Keys', 'Drums', 'Crowd', 'Jib', 'Handheld', 'ProPresenter', 'Lower Thirds'];
+    const mes = [0, 1, 2, 3].map((i) => ({ pgm: i, pvw: (i + 1) % 6, keyers: [i === 0, false] }));
+    const auxes = [9, 0, 1, 2, 8, 5];
+    const src = (n) => ({ input: n + 1, name: names[n] });
+    const push = () => {
+      const meStates = mes.map((m, i) => ({
+        index: i + 1,
+        name: this.cfg.meNames[i] || ['Program', 'Stream', 'IMAG', 'Lobby'][i],
+        program: src(m.pgm),
+        preview: src(m.pvw),
+        ftb: false,
+        inTransition: false,
+        keyers: m.keyers,
+        onAir: [m.pgm + 1, ...(m.keyers[0] ? [10] : [])],
+        next: [m.pvw + 1],
+      }));
+      const primary = meStates[this.cfg.me - 1] || meStates[0];
+      this.hub.update('switchers', this.cfg.id, {
+        name: this.cfg.name || this.cfg.id, type: 'simulator', model: 'ATEM Constellation 4 M/E (sim)', online: true, error: null,
+        inputs: names.map((n, i) => ({ input: i + 1, name: n, short: n.slice(0, 4).toUpperCase() })),
+        mes: meStates,
+        dsks: [{ index: 1, onAir: true, tie: false }, { index: 2, onAir: false, tie: false }],
+        auxes: auxes.map((n, i) => ({ index: i + 1, name: this.cfg.auxNames[i + 1] || ['Stream', 'Record', 'IMAG L', 'IMAG R', 'Stage Display', 'Lobby'][i], source: src(n) })),
+        program: primary.program, preview: primary.preview, ftb: false, streaming: true, recording: true,
+      });
+    };
     push();
     this.timer = setInterval(() => {
-      if (Math.random() < 0.3) { [pgm, pvw] = [pvw, Math.floor(Math.random() * names.length)]; push(); }
+      for (const m of mes) if (Math.random() < 0.15) [m.pgm, m.pvw] = [m.pvw, Math.floor(Math.random() * 8)];
+      push();
     }, 2000);
   }
 

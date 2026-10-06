@@ -14,40 +14,34 @@ propresenter:
 
 switchers:
   - id: atem
-    name: "ATEM Constellation"
+    name: "ATEM Constellation 4 M/E"
     type: simulator
+    me: 1
 
 video:
-  tiles:
+  sources:
     - id: program
       label: "Program"
       type: capture
       device: "UltraStudio"
       switcher: atem
-      size: 2
     - id: multiview
       label: "Multiview"
       type: webrtc
       url: "http://127.0.0.1:8889/multiview/whep"
-      size: 2
-    - id: pp-main
-      label: "ProPresenter"
-      type: propresenter
-      propresenter: main
-      size: 2
 
 mics:
   receivers:
-    - id: ulxd-a
-      name: "ULX-D Rack A"
+    - id: slxd-a
+      name: "SLX-D Rack A"
       type: simulator
       channels:
         - { label: "HH 1", kind: handheld }
         - { label: "HH 2", kind: handheld }
         - { label: "HH 3", kind: handheld }
         - { label: "HH 4", kind: handheld }
-    - id: ulxd-b
-      name: "ULX-D Rack B"
+    - id: slxd-b
+      name: "SLX-D Rack B"
       type: simulator
       channels:
         - { label: "Pastor HS", kind: headset }

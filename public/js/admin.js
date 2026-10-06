@@ -22,6 +22,66 @@ document.getElementById('clear-all').onclick = async () => {
   try { await api('POST', '/api/assignments/clear'); toast('All assignments cleared'); } catch (err) { toast(err.message, true); }
 };
 
+// ---------------------------------------------------------------- service plan
+
+const pcoEl = document.getElementById('pco');
+const manual = document.getElementById('manual');
+let manualFilled = false;
+
+manual.onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    await api('PUT', '/api/service/manual', { title: manual.elements.title.value, start: manual.elements.start.value, text: manual.elements.text.value });
+    toast('Plan loaded');
+  } catch (err) { toast(err.message, true); }
+};
+document.getElementById('reset-progress').onclick = async () => {
+  if (!confirm('Clear the current item and recorded item times?')) return;
+  try { await api('POST', '/api/service/reset'); toast('Progress reset'); } catch (err) { toast(err.message, true); }
+};
+pcoEl.addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-pco]');
+  if (!b) return;
+  try {
+    if (b.dataset.pco === 'refresh') await api('POST', '/api/service/pco/refresh');
+    else {
+      const [serviceTypeId, planId] = b.dataset.pco.split('/');
+      await api('POST', '/api/service/pco', { serviceTypeId, planId });
+      toast('Following this Planning Center plan');
+    }
+  } catch (err) { toast(err.message, true); }
+});
+
+function renderPlan() {
+  const svc = store.service;
+  document.getElementById('plan-status').textContent = svc.plan
+    ? `· now using ${svc.source === 'pco' ? 'Planning Center' : 'manual plan'}: ${svc.plan.title || ''} (${svc.plan.items.filter((i) => i.type !== 'header').length} items)`
+    : '· no plan loaded';
+  if (!manualFilled && svc.source === 'manual' && svc.plan) {
+    manual.elements.title.value = svc.plan.title || '';
+    manual.elements.start.value = svc.plan.start || '';
+    manual.elements.text.value = svc.plan.text || '';
+    manualFilled = true;
+  }
+  if (!store.config.planningCenter) {
+    pcoEl.innerHTML = `<p class="muted">Not connected. Create a Personal Access Token at
+      <a href="https://api.planningcenteronline.com/oauth/applications" target="_blank" rel="noopener">api.planningcenteronline.com/oauth/applications</a>
+      and add it to <code>config/config.yaml</code> under <code>planningCenter: { appId, secret }</code>
+      (or set the <code>PCO_APP_ID</code> / <code>PCO_SECRET</code> environment variables), then restart.</p>`;
+    return;
+  }
+  const st = svc.pco || {};
+  const html = `<div class="muted small" style="margin-bottom:8px">${st.ok === false ? `<span class="over">⚠ ${esc(st.error)}</span>` : st.lastSync ? `✓ Synced ${new Date(st.lastSync).toLocaleTimeString()}` : 'Connecting…'}
+      ${svc.followProPresenter ? ' · auto-advances when ProPresenter shows a matching song or presentation, and follows Services LIVE' : ''}
+      <button class="btn small" data-pco="refresh" style="margin-left:8px">Refresh</button></div>
+    <div class="plans">${(svc.upcoming || []).map((p) => {
+      const on = svc.source === 'pco' && svc.planId === p.id;
+      return `<div class="plan-row ${on ? 'on' : ''}"><div><b>${esc(p.serviceTypeName)}</b> · ${esc(p.dates || '')}<div class="muted small">${esc(p.title || '')}${p.seriesTitle ? ` · ${esc(p.seriesTitle)}` : ''}</div></div>
+        ${on ? '<span class="chip good">In use</span>' : `<button class="btn small" data-pco="${esc(p.serviceTypeId)}/${esc(p.id)}">Use</button>`}</div>`;
+    }).join('') || '<div class="muted">No upcoming plans found.</div>'}</div>`;
+  if (pcoEl._html !== html) { pcoEl._html = html; pcoEl.innerHTML = html; }
+}
+
 // ---------------------------------------------------------------- people
 
 addForm.onsubmit = async (e) => {
@@ -93,6 +153,7 @@ let lastAssign = '';
 let serviceSet = false;
 
 function render() {
+  renderPlan();
   const g = store.greenroom;
   if (!serviceSet && store.connected) {
     serviceForm.sname.value = g.service?.name || '';

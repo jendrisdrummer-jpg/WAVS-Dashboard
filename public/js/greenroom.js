@@ -1,4 +1,5 @@
-import { start, store, onRender, onMeters, applyMeters, esc, micView, battery, photoUrl, initials, meterRows, api, toast, STATUS_LABEL, KIND_ICON } from './common.js';
+import { start, store, onRender, onMeters, applyMeters, api, toast } from './common.js';
+import { greenroomCard } from './views.js';
 import { visibleSlots } from './micstrip.js';
 
 await start({ page: 'greenroom' });
@@ -17,34 +18,6 @@ filterSel.onchange = () => { last = ''; render(); };
 const grid = document.getElementById('gr');
 let last = '';
 
-function card(slot) {
-  const { mic, a, person, txOn, alerting } = micView(slot);
-  const url = photoUrl(person);
-  const status = a?.status;
-  const cls = ['gcard', status ? `status-${status}` : 'unassigned', alerting ? 'alerting' : ''].join(' ');
-  return `<article class="${cls}">
-    <div class="photo" style="${url ? `background-image:url('${url}')` : ''}">
-      ${url ? '' : esc(person ? initials(person.name) : KIND_ICON[slot.kind] || '🎤')}
-      <span class="miclabel">${KIND_ICON[slot.kind] || ''} ${esc(slot.label)}</span>
-      ${status ? `<span class="status-pill ${status}">${STATUS_LABEL[status]}</span>` : ''}
-    </div>
-    <div class="info">
-      <div class="pname">${esc(person?.name || 'Unassigned')}</div>
-      ${person?.role ? `<div class="prole">${esc(person.role)}</div>` : ''}
-      ${a?.note ? `<div class="prole">📝 ${esc(a.note)}</div>` : ''}
-      <div class="stats">
-        ${!mic.online ? '<span class="txoff">RECEIVER OFFLINE</span>' : txOn ? battery(mic) : '<span class="txoff">TRANSMITTER OFF</span>'}
-        ${mic.freqMHz ? `<span class="mono">${mic.freqMHz.toFixed(3)} MHz</span>` : ''}
-        ${mic.txMuted ? '<span class="chip bad">MUTED</span>' : ''}
-      </div>
-      <div class="meters">${meterRows(slot)}</div>
-    </div>
-    ${handoff && a ? `<div class="actions">
-      ${['picked-up', 'on-stage', 'returned'].map((s) => `<button class="btn ${status === s ? `sel ${s}` : ''}" data-mic="${esc(slot.id)}" data-status="${s}">${STATUS_LABEL[s]}</button>`).join('')}
-    </div>` : ''}
-  </article>`;
-}
-
 function render() {
   const show = filterSel.value;
   const slots = visibleSlots().filter((s) => {
@@ -56,7 +29,7 @@ function render() {
   // Stable, useful order: on stage, picked up, assigned, returned, unassigned
   const rank = { 'on-stage': 0, 'picked-up': 1, assigned: 2, returned: 3 };
   slots.sort((x, y) => (rank[store.greenroom.assignments[x.id]?.status] ?? 4) - (rank[store.greenroom.assignments[y.id]?.status] ?? 4));
-  const html = slots.map(card).join('')
+  const html = slots.map((s) => greenroomCard(s, { handoff })).join('')
     || `<div class="panel panel-body muted">Nothing to show. Assign people to mics on the <a href="/admin">People &amp; Mics</a> page.</div>`;
   if (html === last) return;
   last = html;

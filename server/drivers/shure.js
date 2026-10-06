@@ -1,17 +1,28 @@
 import net from 'node:net';
 
 /**
- * Shure networked wireless receivers (ULX-D, QLX-D, SLX-D, Axient Digital, UHF-R*)
- * using the documented TCP command-string protocol on port 2202:
- *   -> < GET 0 ALL >            <- < REP 1 CHAN_NAME {Pastor  } >
- *   -> < SET 0 METER_RATE 00200 > <- < SAMPLE 1 ALL XB 095 030 >
+ * Shure networked wireless receivers (SLX-D, ULX-D, QLX-D, Axient Digital)
+ * using the TCP command-string protocol on port 2202:
+ *   -> < GET 0 ALL >           <- < REP 1 CHAN_NAME {Pastor  } >
+ *   -> < SET 0 METER_RATE 200 > <- < SAMPLE 1 ALL 102 095 085 >     (SLX-D)
+ *                              <- < SAMPLE 1 ALL XB 095 030 >      (ULX-D / QLX-D)
  *
- * Field coverage differs per product line; unknown keys are ignored, so the
- * same driver works across models. Add mappings to FIELD_MAP for anything else
- * your receivers report.
+ * Key names and meter formats differ per product family (SLX-D reports its
+ * transmitter battery as TX_BATT_BARS / TX_BATT_MINS and meters on a 0-120
+ * scale). Unknown keys are ignored. Add mappings to FIELD_MAP for anything
+ * else your receivers report.
  */
 
 const UNKNOWN = new Set(['UNKN', 'UNKNOWN', 'NONE', '']);
+
+/** Product family from the receiver's MODEL report or config ("SLXD4D" -> "slx"). */
+export function familyOf(model) {
+  const m = String(model || '').toUpperCase();
+  if (m.startsWith('SLX')) return 'slx';
+  if (m.startsWith('AD') || m.startsWith('ADX')) return 'ad';
+  if (m.startsWith('ULX') || m.startsWith('QLX')) return 'ulx';
+  return null;
+}
 
 const num = (v) => {
   const n = parseInt(v, 10);
@@ -21,10 +32,14 @@ const num = (v) => {
 /** key -> (rawValue) => partial mic object */
 export const FIELD_MAP = {
   CHAN_NAME: (v) => ({ chanName: v || null }),
-  BATT_BARS: (v) => { const n = num(v); return { battBars: n === null || n > 5 ? null : n }; },
-  BATT_CHARGE: (v) => { const n = num(v); return { battPercent: n === null || n > 100 ? null : n }; },
-  BATT_RUN_TIME: (v) => { const n = num(v); return { battMinutes: n === null || n >= 65533 ? null : n }; },
+  BATT_BARS: (v) => battBars(v),
+  TX_BATT_BARS: (v) => battBars(v), // SLX-D, Axient Digital
+  BATT_CHARGE: (v) => battPercent(v),
+  TX_BATT_CHARGE_PERCENT: (v) => battPercent(v), // Axient Digital
+  BATT_RUN_TIME: (v) => battMinutes(v),
+  TX_BATT_MINS: (v) => battMinutes(v), // SLX-D, Axient Digital
   BATT_TYPE: (v) => ({ battType: UNKNOWN.has(v) ? null : v }),
+  TX_BATT_TYPE: (v) => ({ battType: UNKNOWN.has(v) ? null : v }),
   FREQUENCY: (v) => { const n = num(v); return { freqMHz: n ? n / 1000 : null }; },
   GROUP_CHAN: (v) => ({ groupChan: /^\d+,\d+$/.test(v) ? v : null }),
   TX_TYPE: (v) => ({ txType: UNKNOWN.has(v) ? null : v }),
@@ -33,34 +48,29 @@ export const FIELD_MAP = {
   RF_ANTENNA: (v) => ({ antenna: v }),
   RX_RF_LVL: (v) => { const n = num(v); return { rfDbm: n === null ? null : n - 128 }; },
   AUDIO_LVL: (v) => { const n = num(v); return { audioDbfs: n === null ? null : n - 50 }; },
-  AUDIO_LEVEL_PEAK: (v) => { const n = num(v); return { audioDbfs: n === null ? null : n - 120 }; }, // SLX-D
   AUDIO_GAIN: (v) => { const n = num(v); return { audioGain: n === null ? null : n - 18 }; },
   RF_INT_DET: (v) => ({ interference: v !== 'NONE' && !UNKNOWN.has(v) }),
   INTERFERENCE_STATUS: (v) => ({ interference: v !== 'NONE' && !UNKNOWN.has(v) }),
   ENCRYPTION_WARNING: (v) => ({ encryptionWarning: v === 'ON' }),
 };
 
+function battBars(v) { const n = num(v); return { battBars: n === null || n > 5 ? null : n }; }
+function battPercent(v) { const n = num(v); return { battPercent: n === null || n > 100 ? null : n }; }
+// 65535 = unknown, 65534 = calculating, 65533 = communication warning
+function battMinutes(v) { const n = num(v); return { battMinutes: n === null || n >= 65533 ? null : n }; }
+
 const DEVICE_FIELDS = { MODEL: 'model', DEVICE_ID: 'deviceId', FW_VER: 'firmware', RF_BAND: 'band' };
 
 /**
  * Parse a single "< ... >" message body (without the angle brackets).
- * Returns { kind: 'channel', channel, data } | { kind: 'device', data } | null
+ * `family` ("slx" | "ulx" | "ad") selects the meter format; without it the
+ * format is inferred from the shape of the sample.
+ * Returns { kind: 'channel' | 'meter', channel, data } | { kind: 'device', data } | null
  */
-export function parseMessage(body) {
+export function parseMessage(body, family = null) {
   const text = body.trim();
-  // Sample/meter message: SAMPLE <ch> ALL [antenna] <rf> <audio> ...
   let m = text.match(/^SAMPLE\s+(\d+)\s+ALL\s+(.*)$/);
-  if (m) {
-    const parts = m[2].trim().split(/\s+/);
-    const data = {};
-    if (parts[0] && /^[A-Z]+$/i.test(parts[0])) data.antenna = parts.shift();
-    const nums = parts.map(num).filter((n) => n !== null);
-    if (nums.length >= 2) {
-      data.rfDbm = nums[0] - 128;
-      data.audioDbfs = nums[1] - 50;
-    }
-    return { kind: 'meter', channel: Number(m[1]), data };
-  }
+  if (m) return { kind: 'meter', channel: Number(m[1]), data: parseSample(m[2].trim().split(/\s+/), family) };
   // Channel report: REP <ch> KEY value   (value may be wrapped in {braces})
   m = text.match(/^(?:REP|REPORT)\s+(\d+)\s+([A-Z0-9_]+)\s*(.*)$/);
   if (m) {
@@ -76,6 +86,30 @@ export function parseMessage(body) {
     return { kind: 'device', data: { [DEVICE_FIELDS[m[1]]]: m[2].replace(/^\{|\}$/g, '').trim() } };
   }
   return null;
+}
+
+function parseSample(parts, family) {
+  const f = family || (/^[A-Z]+$/i.test(parts[0]) ? 'ulx' : parts.length >= 8 ? 'ad' : 'slx');
+  const n = parts.map(num);
+  if (f === 'slx') {
+    // SLX-D: <audio peak> <audio rms> <rf level>, all 0-120 with a -120 offset
+    if (n.length < 3) return {};
+    return { audioDbfs: n[0] - 120, audioRms: n[1] - 120, rfDbm: n[2] - 120 };
+  }
+  if (f === 'ad') {
+    // Axient Digital: <quality> <audio LED> <peak> <rms> <antennas> <bitmapA> <rfA> <bitmapB> <rfB> ...
+    const rf = [n[6], n[8]].filter((x) => x != null).map((x) => x - 120);
+    return { audioDbfs: n[2] - 120, audioRms: n[3] - 120, antenna: parts[4], rfDbm: rf.length ? Math.max(...rf) : null };
+  }
+  // ULX-D / QLX-D: <antenna> <rf 0-115, -128> <audio 0-50, -50>
+  const data = {};
+  if (/^[A-Z]+$/i.test(parts[0])) data.antenna = parts.shift();
+  const nums = parts.map(num).filter((x) => x !== null);
+  if (nums.length >= 2) {
+    data.rfDbm = nums[0] - 128;
+    data.audioDbfs = nums[1] - 50;
+  }
+  return data;
 }
 
 /** Split a TCP stream buffer into complete "< ... >" bodies plus leftover text. */
@@ -95,6 +129,7 @@ export function splitMessages(buffer) {
 export class ShureReceiver {
   constructor(cfg, hub, micIdFor) {
     this.cfg = { port: 2202, channels: 4, meterRateMs: 200, pollMs: 5000, ...cfg };
+    this.family = familyOf(this.cfg.model);
     this.hub = hub;
     this.micIdFor = micIdFor;
     this.buffer = '';
@@ -125,7 +160,7 @@ export class ShureReceiver {
       this.send('< GET 0 ALL >');
       this.send('< GET MODEL >');
       this.send('< GET FW_VER >');
-      if (this.cfg.meterRateMs) this.send(`< SET 0 METER_RATE ${String(this.cfg.meterRateMs).padStart(5, '0')} >`);
+      if (this.cfg.meterRateMs) this.send(`< SET 0 METER_RATE ${Math.max(100, this.cfg.meterRateMs)} >`);
       // Some models don't push every change; a slow re-poll keeps battery/frequency fresh.
       this.poll = setInterval(() => this.send('< GET 0 ALL >'), this.cfg.pollMs);
     });
@@ -155,9 +190,10 @@ export class ShureReceiver {
     const { messages, rest } = splitMessages(this.buffer + chunk);
     this.buffer = rest.length > 4096 ? '' : rest;
     for (const body of messages) {
-      const msg = parseMessage(body);
+      const msg = parseMessage(body, this.family);
       if (!msg) continue;
       if (msg.kind === 'device') {
+        if (msg.data.model && !this.cfg.model) this.family = familyOf(msg.data.model);
         this.hub.update('receivers', this.cfg.id, msg.data);
       } else if (msg.channel >= 1 && msg.channel <= this.cfg.channels) {
         const id = this.micIdFor(this.cfg.id, msg.channel);

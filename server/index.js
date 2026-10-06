@@ -14,10 +14,22 @@ import { ShureReceiver } from './drivers/shure.js';
 import { ProPresenter } from './drivers/propresenter.js';
 import { AtemSwitcher, VmixSwitcher } from './drivers/switchers.js';
 import { SimReceiver, SimProPresenter, SimSwitcher } from './drivers/simulator.js';
+import { PlanningCenter } from './drivers/planningcenter.js';
+import { ServiceManager } from './service.js';
+import { Board, Dashboards } from './collab.js';
+import { defaultDashboards } from './default-dashboards.js';
 
 const cfg = loadConfig();
 const hub = new Hub();
-const store = new GreenroomStore(path.resolve(ROOT, process.env.WAVS_DATA || 'data'));
+const dataDir = path.resolve(ROOT, process.env.WAVS_DATA || 'data');
+const store = new GreenroomStore(dataDir);
+const board = new Board(dataDir);
+const dashboards = new Dashboards(dataDir, defaultDashboards(cfg));
+const service = new ServiceManager({
+  dataDir,
+  pco: cfg.planningCenter ? new PlanningCenter(cfg.planningCenter) : null,
+  cfg: cfg.service,
+});
 
 // ---------------------------------------------------------------- devices
 
@@ -140,6 +152,39 @@ function pushName(micId) {
   return true;
 }
 
+// ---- service plan (Planning Center or manual)
+app.get('/api/service', (_req, res) => res.json(service.state()));
+app.post('/api/service/pco', requirePin, wrap(async (req, res) => {
+  await service.selectPco(String(req.body?.serviceTypeId), String(req.body?.planId));
+  res.json(service.state());
+}));
+app.post('/api/service/pco/refresh', requirePin, wrap(async (_req, res) => {
+  await service.refreshUpcoming();
+  await service.reloadPco();
+  res.json(service.state());
+}));
+app.put('/api/service/manual', requirePin, wrap((req, res) => {
+  service.setManual({ title: String(req.body?.title || ''), text: String(req.body?.text || ''), start: String(req.body?.start || '') });
+  res.json(service.state());
+}));
+// Moving through the plan is allowed without the PIN so any operator can follow along.
+app.post('/api/service/current', wrap((req, res) => { service.setCurrent(req.body?.itemId || null, 'manual'); res.json({ ok: true }); }));
+app.post('/api/service/next', wrap((_req, res) => { service.step(1); res.json({ ok: true }); }));
+app.post('/api/service/previous', wrap((_req, res) => { service.step(-1); res.json({ ok: true }); }));
+app.post('/api/service/reset', requirePin, wrap((_req, res) => { service.resetProgress(); res.json({ ok: true }); }));
+
+// ---- shared notes & checklists (team-editable, no PIN)
+app.put('/api/notes/:name', wrap((req, res) => { board.setNote(req.params.name, req.body?.text); res.json({ ok: true }); }));
+app.put('/api/checklists/:name', wrap((req, res) => { board.setChecklist(req.params.name, req.body || {}); res.json({ ok: true }); }));
+app.post('/api/checklists/:name/toggle', wrap((req, res) => { board.toggle(req.params.name, req.body?.itemId, req.body?.done); res.json({ ok: true }); }));
+app.post('/api/checklists/:name/reset', wrap((req, res) => { board.resetChecklist(req.params.name); res.json({ ok: true }); }));
+
+// ---- dashboards (layouts)
+app.get('/api/dashboards', (_req, res) => res.json(dashboards.list()));
+app.post('/api/dashboards', requirePin, wrap((req, res) => res.json(dashboards.create(req.body || {}))));
+app.put('/api/dashboards/:id', requirePin, wrap((req, res) => res.json(dashboards.update(req.params.id, req.body || {}))));
+app.delete('/api/dashboards/:id', requirePin, wrap((req, res) => { dashboards.remove(req.params.id); res.json({ ok: true }); }));
+
 app.get('/api/propresenter/:id/thumbnail/:uuid/:index', async (req, res) => {
   try {
     const img = await propresenters[req.params.id]?.thumbnail(req.params.uuid, req.params.index);
@@ -158,11 +203,13 @@ app.post('/api/propresenter/:id/stage-message', requirePin, wrap(async (req, res
 
 // Static files
 const pub = path.join(ROOT, 'public');
-for (const [route, file] of [['/', 'index.html'], ['/greenroom', 'greenroom.html'], ['/rf', 'rf.html'], ['/admin', 'admin.html']]) {
+for (const [route, file] of [['/', 'dashboard.html'], ['/d/:slug', 'dashboard.html'], ['/greenroom', 'greenroom.html'], ['/rf', 'rf.html'], ['/admin', 'admin.html']]) {
   app.get(route, (_req, res) => res.sendFile(path.join(pub, file)));
 }
 app.use('/uploads', express.static(store.uploads, { maxAge: '1h' }));
 app.get('/vendor/hls.min.js', (_req, res) => res.sendFile(path.join(ROOT, 'node_modules/hls.js/dist/hls.min.js')));
+app.get('/vendor/gridstack-all.js', (_req, res) => res.sendFile(path.join(ROOT, 'node_modules/gridstack/dist/gridstack-all.js')));
+app.get('/vendor/gridstack.min.css', (_req, res) => res.sendFile(path.join(ROOT, 'node_modules/gridstack/dist/gridstack.min.css')));
 if (cfg.org.logo && fs.existsSync(path.resolve(ROOT, cfg.org.logo))) {
   app.get('/logo', (_req, res) => res.sendFile(path.resolve(ROOT, cfg.org.logo)));
 }
@@ -174,7 +221,10 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 function snapshot() {
-  return { type: 'snapshot', state: hub.state, slots: micSlots, greenroom: store.data, alerts };
+  return {
+    type: 'snapshot', state: hub.state, slots: micSlots, greenroom: store.data, alerts,
+    service: service.state(), board: board.data, dashboards: dashboards.list(),
+  };
 }
 
 function broadcast(msg) {
@@ -198,19 +248,38 @@ setInterval(() => {
 hub.on('update', (u) => broadcast({ type: 'update', ...u }));
 hub.on('meters', (meters) => broadcast({ type: 'meters', meters }));
 store.on('change', (data) => { broadcast({ type: 'greenroom', greenroom: data }); refreshAlerts(); });
+service.on('change', (data) => broadcast({ type: 'service', service: data }));
+board.on('change', (data) => broadcast({ type: 'board', board: data }));
+dashboards.on('change', () => broadcast({ type: 'dashboards', dashboards: dashboards.list() }));
+
+// Auto-track the service: ProPresenter changing presentation moves the plan along.
+const lastPresentation = {};
+hub.on('update', ({ section, id, data }) => {
+  if (section !== 'propresenter' || !data?.presentation?.name) return;
+  if (lastPresentation[id] === data.presentation.name) return;
+  lastPresentation[id] = data.presentation.name;
+  service.onPresentation(data.presentation.name);
+});
+// A newly loaded plan picks up wherever ProPresenter already is.
+service.on('planLoaded', () => {
+  for (const pp of Object.values(hub.state.propresenter)) if (pp.online && pp.presentation?.name) service.onPresentation(pp.presentation.name);
+});
 
 // ---------------------------------------------------------------- start
 
 for (const d of [...Object.values(receivers), ...Object.values(propresenters), ...Object.values(switchers)]) d.start();
+service.start().catch((e) => console.error(`[service] ${e.message}`));
 
 server.listen(cfg.server.port, cfg.server.host, () => {
   console.log(`WAVS Dashboard running: http://localhost:${cfg.server.port}  (config: ${path.relative(ROOT, cfg._file)})`);
-  console.log(`  Dashboard  /   Green room  /greenroom   RF  /rf   Admin  /admin`);
+  console.log(`  Dashboards  /   Green room  /greenroom   RF  /rf   Admin  /admin`);
+  if (cfg.planningCenter) console.log('  Planning Center: connected (plans load in the background)');
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     for (const d of [...Object.values(receivers), ...Object.values(propresenters), ...Object.values(switchers)]) d.stop?.();
+    service.stop();
     server.close();
     process.exit(0);
   });

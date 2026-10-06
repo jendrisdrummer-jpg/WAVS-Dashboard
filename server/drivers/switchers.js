@@ -4,10 +4,17 @@
  * so the dashboard can label the program feed with what's actually on air.
  */
 
-/** Blackmagic ATEM via the `atem-connection` package (installed as an optional dependency). */
+/**
+ * Blackmagic ATEM via the `atem-connection` package (installed as an optional dependency).
+ * Works with every ATEM model; multi-M/E switchers such as the Constellation 4 M/E report
+ * every M/E, aux output and downstream keyer.
+ *
+ * Config: `me` is the 1-based M/E shown by default ("PGM" overlays, simple tally);
+ * `meNames` / `auxNames` give friendly names, e.g. auxNames: { 1: "Stream", 2: "Lobby TV" }.
+ */
 export class AtemSwitcher {
   constructor(cfg, hub) {
-    this.cfg = { me: 0, ...cfg };
+    this.cfg = { me: 1, meNames: [], auxNames: {}, ...cfg };
     this.hub = hub;
   }
 
@@ -24,26 +31,58 @@ export class AtemSwitcher {
     this.atem.on('connected', () => { this.hub.update('switchers', this.cfg.id, { online: true, error: null }); this.publish(); });
     this.atem.on('disconnected', () => this.hub.update('switchers', this.cfg.id, { online: false }));
     this.atem.on('error', (e) => this.hub.update('switchers', this.cfg.id, { error: String(e) }));
-    this.atem.on('stateChanged', () => this.publish());
+    // State changes arrive many times per second during transitions; publish at most 10x/sec.
+    this.atem.on('stateChanged', () => {
+      if (this.pending) return;
+      this.pending = setTimeout(() => { this.pending = null; this.publish(); }, 100);
+    });
     this.atem.connect(this.cfg.host);
   }
 
   publish() {
     const s = this.atem?.state;
     if (!s) return;
-    const me = s.video?.mixEffects?.[this.cfg.me];
     const name = (n) => (n == null ? null : s.inputs?.[n]?.longName || s.inputs?.[n]?.shortName || `Input ${n}`);
+    const src = (n) => (n == null ? null : { input: n, name: name(n) });
+    const visible = (mode, i) => { try { return this.atem.listVisibleInputs(mode, i); } catch { return []; } };
+
+    const mes = (s.video?.mixEffects || []).map((me, i) => me && {
+      index: i + 1,
+      name: this.cfg.meNames[i] || `M/E ${i + 1}`,
+      program: src(me.programInput),
+      preview: src(me.previewInput),
+      ftb: Boolean(me.fadeToBlack?.isFullyBlack),
+      inTransition: Boolean(me.transitionPosition?.inTransition),
+      keyers: (me.upstreamKeyers || []).map((k) => Boolean(k?.onAir)),
+      onAir: visible('program', i),
+      next: visible('preview', i),
+    }).filter(Boolean);
+    const primary = mes[this.cfg.me - 1] || mes[0];
+
+    // Camera / external inputs, for tally lights (InternalPortType.External = 0)
+    const inputs = Object.values(s.inputs || {})
+      .filter((i) => i && i.internalPortType === 0)
+      .map((i) => ({ input: i.inputId, name: i.longName || `Input ${i.inputId}`, short: i.shortName || String(i.inputId) }))
+      .sort((a, b) => a.input - b.input);
+
     this.hub.update('switchers', this.cfg.id, {
       model: s.info?.productIdentifier || 'ATEM',
-      program: me ? { input: me.programInput, name: name(me.programInput) } : null,
-      preview: me ? { input: me.previewInput, name: name(me.previewInput) } : null,
-      ftb: Boolean(me?.fadeToBlack?.isFullyBlack),
-      streaming: s.streaming?.status?.state != null ? s.streaming.status.state === 4 : null, // 4 = Streaming
-      recording: s.recording?.status?.state != null ? s.recording.status.state === 1 : null, // 1 = Recording
+      inputs,
+      mes,
+      dsks: (s.video?.downstreamKeyers || []).map((k, i) => k && { index: i + 1, onAir: Boolean(k.onAir), tie: Boolean(k.properties?.tie) }).filter(Boolean),
+      auxes: (s.video?.auxilliaries || []).map((input, i) => input != null && {
+        index: i + 1, name: this.cfg.auxNames[i + 1] || `Aux ${i + 1}`, source: src(input),
+      }).filter(Boolean),
+      // Shortcuts for the default M/E (tile overlays, simple tally widgets)
+      program: primary?.program || null,
+      preview: primary?.preview || null,
+      ftb: primary?.ftb || false,
+      streaming: s.streaming?.status?.state != null ? s.streaming.status.state === 4 : null, // StreamingStatus.Streaming
+      recording: s.recording?.status?.state != null ? s.recording.status.state === 1 : null, // RecordingStatus.Recording
     });
   }
 
-  stop() { this.atem?.disconnect(); }
+  stop() { clearTimeout(this.pending); this.atem?.disconnect(); }
 }
 
 /** vMix via its HTTP API (http://host:8088/api returns XML). */
@@ -85,11 +124,16 @@ export function parseVmix(xml) {
   }
   const active = tag('active');
   const preview = tag('preview');
+  const program = active ? { input: Number(active), name: titles[active] } : null;
+  const pvw = preview ? { input: Number(preview), name: titles[preview] } : null;
+  const ftb = tag('fadeToBlack') === 'True';
   return {
     model: `vMix ${tag('version') || ''}`.trim(),
-    program: active ? { input: Number(active), name: titles[active] } : null,
-    preview: preview ? { input: Number(preview), name: titles[preview] } : null,
-    ftb: tag('fadeToBlack') === 'True',
+    inputs: Object.entries(titles).map(([n, name]) => ({ input: Number(n), name, short: n })),
+    mes: [{ index: 1, name: 'Output', program, preview: pvw, ftb, keyers: [], onAir: program ? [program.input] : [], next: pvw ? [pvw.input] : [] }],
+    program,
+    preview: pvw,
+    ftb,
     streaming: tag('streaming') ? tag('streaming') === 'True' : null,
     recording: tag('recording') ? tag('recording') === 'True' : null,
   };

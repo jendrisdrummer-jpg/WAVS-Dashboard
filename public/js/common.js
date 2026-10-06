@@ -5,8 +5,12 @@ export const store = {
   state: { receivers: {}, mics: {}, propresenter: {}, switchers: {} },
   slots: [],
   greenroom: { service: {}, people: [], assignments: {} },
+  service: { plan: null, current: null, actuals: {}, upcoming: [], pco: {} },
+  board: { notes: {}, checklists: {} },
+  dashboards: [],
   alerts: [],
   connected: false,
+  ready: false,
 };
 
 const renderers = new Set();
@@ -29,10 +33,18 @@ export function requestRender() {
 export async function start({ page }) {
   store.config = await (await fetch('/api/config')).json();
   applyTheme(store.config);
+  // ?kiosk=1 hides the header (TVs, confidence monitors); alerts stay visible.
+  if (new URLSearchParams(location.search).get('kiosk') === '1') document.body.classList.add('kiosk');
   renderHeader(page);
   connect();
   setInterval(tickClock, 1000);
   tickClock();
+  // Wait for the first snapshot so pages can build from real data.
+  await new Promise((resolve) => {
+    const check = () => (store.ready ? resolve() : setTimeout(check, 50));
+    check();
+  });
+  setTimeout(requestRender); // pages register their renderers right after start() resolves
 }
 
 function connect() {
@@ -47,9 +59,15 @@ function connect() {
     const msg = JSON.parse(ev.data);
     switch (msg.type) {
       case 'snapshot':
-        Object.assign(store, { state: msg.state, slots: msg.slots, greenroom: msg.greenroom });
+        Object.assign(store, {
+          state: msg.state, slots: msg.slots, greenroom: msg.greenroom,
+          service: msg.service, board: msg.board, dashboards: msg.dashboards, ready: true,
+        });
         setAlerts(msg.alerts);
         break;
+      case 'service': store.service = msg.service; break;
+      case 'board': store.board = msg.board; break;
+      case 'dashboards': store.dashboards = msg.dashboards; break;
       case 'update':
         if (msg.data) store.state[msg.section][msg.id] = msg.data;
         else delete store.state[msg.section][msg.id];
@@ -114,11 +132,13 @@ function renderHeader(page) {
         <span>${esc(cfg.org.name)}</span>
         <span class="service" data-service></span>
       </div>
+      <div data-slot class="slot"></div>
       <nav class="nav">
-        ${[['/', 'Dashboard', 'dash'], ['/greenroom', 'Green Room', 'greenroom'], ['/rf', 'RF & Batteries', 'rf'], ['/admin', 'People & Mics', 'admin']]
+        ${[['/', 'Dashboards', 'dash'], ['/greenroom', 'Green Room', 'greenroom'], ['/rf', 'RF & Batteries', 'rf'], ['/admin', 'Setup', 'admin']]
           .map(([href, label, id]) => `<a href="${href}" class="${id === page ? 'active' : ''}">${label}</a>`).join('')}
       </nav>
       <div class="spacer"></div>
+      <div data-slot-right class="slot"></div>
       <span class="conn" data-conn>Offline</span>
       <span class="clock" data-clock></span>
     </div>
@@ -192,7 +212,7 @@ export function battery(m, { showText = true } = {}) {
 }
 
 export const rfPct = (dbm) => (dbm == null ? 0 : Math.max(0, Math.min(100, ((dbm + 100) / 60) * 100)));
-export const audioPct = (dbfs) => (dbfs == null ? 0 : Math.max(0, Math.min(100, ((dbfs + 50) / 50) * 100)));
+export const audioPct = (dbfs) => (dbfs == null ? 0 : Math.max(0, Math.min(100, ((dbfs + 60) / 60) * 100)));
 
 /** Meter rows; they're updated in place by applyMeters() without re-rendering the card. */
 export function meterRows(slot) {
@@ -243,6 +263,27 @@ export async function api(method, url, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
+}
+
+/** Set innerHTML only when it changed (keeps focus, scroll and animations intact). */
+export function setHTML(el, html) {
+  if (el._html === html) return false;
+  el._html = html;
+  el.innerHTML = html;
+  return true;
+}
+
+export const pad2 = (n) => String(n).padStart(2, '0');
+
+/** 125 -> "2:05", -40 -> "-0:40", 3700 -> "1:01:40" */
+export function fmtDuration(sec) {
+  const neg = sec < 0;
+  let s = Math.abs(Math.round(sec));
+  const h = Math.floor(s / 3600);
+  s -= h * 3600;
+  const m = Math.floor(s / 60);
+  const out = h ? `${h}:${pad2(m)}:${pad2(s % 60)}` : `${m}:${pad2(s % 60)}`;
+  return neg ? `-${out}` : out;
 }
 
 export function toast(text, isError = false) {

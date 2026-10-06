@@ -4,7 +4,7 @@ import { store, esc } from './common.js';
 
 export function buildTile(cfg) {
   const el = document.createElement('div');
-  el.className = `tile size-${cfg.size || 1}`;
+  el.className = 'tile';
   el.tabIndex = 0;
   el.innerHTML = `
     <div class="label"><span>${esc(cfg.label || cfg.id)}</span></div>
@@ -25,12 +25,15 @@ export function buildTile(cfg) {
     const sw = cfg.switcher && store.state.switchers[cfg.switcher];
     const tally = el.querySelector('.tally');
     if (sw) {
-      tally.innerHTML = sw.online
-        ? `${sw.ftb ? '<span class="chip bad">FTB</span>' : ''}
-           ${sw.program ? `<span class="chip live">PGM · ${esc(sw.program.name)}</span>` : ''}
-           ${sw.preview ? `<span class="chip good">PVW · ${esc(sw.preview.name)}</span>` : ''}`
+      // Overlay the program/preview of the chosen M/E (Constellation etc.), or the switcher default.
+      const me = (cfg.me && sw.mes?.[cfg.me - 1]) || sw;
+      const html = sw.online
+        ? `${me.ftb ? '<span class="chip bad">FTB</span>' : ''}
+           ${me.program ? `<span class="chip live">PGM · ${esc(me.program.name)}</span>` : ''}
+           ${me.preview ? `<span class="chip good">PVW · ${esc(me.preview.name)}</span>` : ''}`
         : '<span class="chip bad">Switcher offline</span>';
-      el.classList.toggle('on-air', sw.online && !sw.ftb);
+      if (tally._html !== html) { tally._html = html; tally.innerHTML = html; }
+      el.classList.toggle('on-air', sw.online && !me.ftb);
     }
   };
   return tile;

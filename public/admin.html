@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>People &amp; Mics</title>
+  <title>Setup</title>
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
@@ -17,6 +17,28 @@
           <button class="btn danger" type="button" id="clear-all">Clear all assignments</button>
         </div>
       </form>
+    </div>
+
+    <div class="panel" id="plan">
+      <h2>Service plan <span class="muted" id="plan-status" style="text-transform:none;letter-spacing:0;font-weight:500"></span></h2>
+      <div class="panel-body plan-setup">
+        <section>
+          <h3>Planning Center</h3>
+          <div id="pco"></div>
+        </section>
+        <section>
+          <h3>Type or paste a plan <span class="muted small">(Faith Teams, a PDF run sheet, one-off events)</span></h3>
+          <form id="manual" class="grid-form">
+            <label>Title <input type="text" name="title" placeholder="Sunday 9:00"></label>
+            <label>Service starts <input type="time" name="start"></label>
+            <label class="full">Order of service, one item per line
+              <textarea name="text" rows="9" placeholder="# Pre-service&#10;10:00 Walk-in loop&#10;# Worship&#10;song 4:30 Goodness Of God&#10;song 5:00 Holy Forever&#10;# Message&#10;0:30 Bumper&#10;35m Message&#10;3:00 Closing prayer"></textarea></label>
+            <div class="full muted small">Length can be <code>4:30</code> or <code>35m</code> anywhere on the line. Start a line with <code>#</code> for a section header, or <code>song</code> to mark a song.</div>
+            <div class="full row-btns"><button class="btn primary" type="submit">Use this plan</button></div>
+          </form>
+        </section>
+        <div class="row-btns"><button class="btn danger" id="reset-progress" type="button">Reset progress (start the service over)</button></div>
+      </div>
     </div>
 
     <div class="panel">

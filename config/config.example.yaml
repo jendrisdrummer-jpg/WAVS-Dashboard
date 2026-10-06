@@ -32,6 +32,18 @@ control:
   propresenterStageMessage: true      # send a message to the stage display from the dashboard
   pushNamesToReceivers: false         # write the assigned person's first name to the receiver's channel name
 
+# ---------------------------------------------------------------- Planning Center Services
+# Create a Personal Access Token at https://api.planningcenteronline.com/oauth/applications
+# (or set PCO_APP_ID / PCO_SECRET environment variables instead of writing them here).
+# The next upcoming plan is picked automatically; choose another on the Setup page.
+# planningCenter:
+#   appId: "your-application-id"
+#   secret: "your-secret"
+#   serviceTypes: []                  # limit to these service type IDs (empty = all)
+
+service:
+  followProPresenter: true            # advance the plan when ProPresenter shows a song/presentation with a matching name
+
 # ---------------------------------------------------------------- ProPresenter 7
 # ProPresenter > Settings > Network > Enable Network. Use the port shown there.
 propresenter:
@@ -47,18 +59,21 @@ propresenter:
 # ---------------------------------------------------------------- Switchers (tally)
 switchers:
   - id: atem
-    name: "ATEM Main"
+    name: "ATEM Constellation"
     type: atem                        # atem | vmix | simulator
     host: 192.168.1.240
-    me: 0                             # mix effect bus (0 = M/E 1)
+    me: 1                             # default M/E for tally overlays (1 = M/E 1)
+    meNames: ["Program", "Stream", "IMAG", "Lobby"]
+    auxNames: { 1: "Stream", 2: "Record", 3: "IMAG L", 4: "IMAG R" }
   # - id: vmix
   #   name: "vMix Stream"
   #   type: vmix
   #   host: 192.168.1.50
   #   port: 8088
 
-# ---------------------------------------------------------------- Video tiles
-# Tile types:
+# ---------------------------------------------------------------- Video sources
+# Each source can be shown by any number of "Video feed" widgets on any dashboard.
+# Types:
 #   capture  – a capture device on the computer running the browser (USB/Thunderbolt
 #              capture of the switcher's multiview or program HDMI/SDI out).
 #              `device` is part of the device's name, e.g. "UltraStudio", "Magewell", "Cam Link".
@@ -67,46 +82,37 @@ switchers:
 #   hls      – an .m3u8 URL (higher latency, works everywhere)
 #   mjpeg    – an MJPEG or periodically refreshed JPEG snapshot URL
 #   iframe   – any web page (e.g. an encoder's status page)
-#   propresenter – live text + thumbnail of the current/next slide
-# size: 1 (normal), 2 (double width), "wide" (full row)
 video:
-  tiles:
+  sources:
     - id: program
       label: "Program"
       type: capture
       device: "UltraStudio"
-      switcher: atem                  # shows the on-air source name from this switcher
-      size: 2
+      switcher: atem                  # default tally overlay (can be changed per widget)
     - id: multiview
       label: "ATEM Multiview"
       type: webrtc
       url: "http://192.168.1.10:8889/multiview/whep"
-      size: 2
-    - id: pp-main
-      label: "ProPresenter"
-      type: propresenter
-      propresenter: main
 
 # ---------------------------------------------------------------- Wireless mics
 # channels: a number, or a list of labels / { label, kind, color, hidden }
 # kind: handheld | lav | headset | iem | instrument
 mics:
   receivers:
-    - id: ulxd-a
-      name: "ULX-D Rack A"
-      type: shure                     # shure (ULX-D, QLX-D, SLX-D, Axient Digital) | simulator
+    - id: slxd-a
+      name: "SLX-D Rack A"
+      type: shure                     # shure (SLX-D, ULX-D, QLX-D, Axient Digital) | simulator
+      model: SLXD4D                   # optional; detected from the receiver otherwise
       host: 192.168.1.101
-      meterRateMs: 200                # live RF/audio meter rate
-      nameLength: 8                   # ULX-D shows 8 characters
+      meterRateMs: 200                # live RF/audio meter rate (min 100)
+      nameLength: 8                   # characters written when pushing names to the receiver
       channels:
         - { label: "HH 1", kind: handheld }
         - { label: "HH 2", kind: handheld }
-        - { label: "HH 3", kind: handheld }
-        - { label: "Pastor HS", kind: headset }
-    - id: qlxd-b
-      name: "QLX-D Rack B"
+    - id: slxd-b
+      name: "SLX-D Rack B"
       type: shure
       host: 192.168.1.102
       channels:
+        - { label: "Pastor HS", kind: headset }
         - { label: "Lav 1", kind: lav }
-        - { label: "Lav 2", kind: lav }

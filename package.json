@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "express": "^5.2.1",
+    "gridstack": "^12.6.0",
     "hls.js": "^1.6.0",
     "multer": "^2.0.0",
     "ws": "^8.18.0",

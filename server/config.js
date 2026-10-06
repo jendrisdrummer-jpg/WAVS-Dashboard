@@ -24,7 +24,9 @@ const DEFAULTS = {
   propresenter: [],
   switchers: [],
   mics: { receivers: [], slots: {} },
-  video: { tiles: [] },
+  video: { sources: [] },
+  planningCenter: null, // { appId, secret, serviceTypes: [] }
+  service: { followProPresenter: true },
   control: { propresenterStageMessage: false, pushNamesToReceivers: false },
 };
 
@@ -45,6 +47,12 @@ export function loadConfig() {
       const parsed = YAML.parse(fs.readFileSync(file, 'utf8')) || {};
       const cfg = merge(DEFAULTS, parsed);
       cfg._file = file;
+      // `video.tiles` was the original name for video sources; accept both.
+      cfg.video.sources = [...(cfg.video.sources || []), ...(cfg.video.tiles || [])];
+      delete cfg.video.tiles;
+      const pcoId = process.env.PCO_APP_ID || cfg.planningCenter?.appId;
+      const pcoSecret = process.env.PCO_SECRET || cfg.planningCenter?.secret;
+      cfg.planningCenter = pcoId && pcoSecret ? { serviceTypes: [], ...cfg.planningCenter, appId: pcoId, secret: pcoSecret } : null;
       if (process.env.PORT) cfg.server.port = Number(process.env.PORT);
       return cfg;
     }
@@ -60,6 +68,9 @@ export function publicConfig(cfg) {
     rf: cfg.rf,
     video: cfg.video,
     control: cfg.control,
+    switchers: cfg.switchers.map((s) => ({ id: s.id, name: s.name || s.id, me: s.me || 1 })),
+    propresenter: cfg.propresenter.map((p) => ({ id: p.id, name: p.name || p.id })),
+    planningCenter: Boolean(cfg.planningCenter),
     pinRequired: Boolean(cfg.security.adminPin),
   };
 }

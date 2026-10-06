@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMessage, splitMessages } from '../server/drivers/shure.js';
+import { parseMessage, splitMessages, familyOf } from '../server/drivers/shure.js';
 import { parseVmix } from '../server/drivers/switchers.js';
 import { computeAlerts } from '../server/alerts.js';
 
@@ -29,6 +29,23 @@ test('parses device reports', () => {
 
 test('parses meter samples', () => {
   assert.deepEqual(parseMessage('SAMPLE 3 ALL XB 090 035'), { kind: 'meter', channel: 3, data: { antenna: 'XB', rfDbm: -38, audioDbfs: -15 } });
+});
+
+test('SLX-D: transmitter battery keys and 0-120 meter samples', () => {
+  assert.equal(familyOf('SLXD4D'), 'slx');
+  assert.deepEqual(parseMessage('REP 2 TX_BATT_BARS 004').data, { battBars: 4 });
+  assert.deepEqual(parseMessage('REP 2 TX_BATT_MINS 00185').data, { battMinutes: 185 });
+  assert.deepEqual(parseMessage('REP 2 TX_BATT_MINS 65534').data, { battMinutes: null });
+  assert.deepEqual(parseMessage('REP 2 TX_TYPE SLXD2').data, { txType: 'SLXD2' });
+  // peak, rms, rf  ->  -18 dBFS peak, -30 dBFS rms, -45 dBm
+  assert.deepEqual(parseMessage('SAMPLE 2 ALL 102 090 075', 'slx').data, { audioDbfs: -18, audioRms: -30, rfDbm: -45 });
+  // Same sample without a known family is recognised by its shape (no antenna token, 3 values)
+  assert.deepEqual(parseMessage('SAMPLE 2 ALL 102 090 075').data, { audioDbfs: -18, audioRms: -30, rfDbm: -45 });
+});
+
+test('Axient Digital meter sample uses the stronger antenna', () => {
+  const d = parseMessage('SAMPLE 1 ALL 05 003 100 090 AB 012 070 010 060', 'ad').data;
+  assert.deepEqual(d, { audioDbfs: -20, audioRms: -30, antenna: 'AB', rfDbm: -50 });
 });
 
 test('parses vMix XML tally', () => {
