@@ -17,16 +17,17 @@ setHTML(document.getElementById('links'), [
 
 function gearSummary() {
   const rows = [
-    ...Object.values(store.state.receivers).map((r) => ['Wireless', r.name, r.online, r.error]),
-    ...Object.values(store.state.switchers).map((r) => ['Switcher', r.name, r.online, r.error]),
-    ...Object.values(store.state.propresenter).map((r) => ['ProPresenter', r.name, r.online, r.error]),
+    ...Object.values(store.state.receivers).map((r) => ['Wireless', r.name, r.online, r.error, r.placeholder]),
+    ...Object.values(store.state.switchers).map((r) => ['Switcher', r.name, r.online, r.error, r.placeholder]),
+    ...Object.values(store.state.propresenter).map((r) => ['ProPresenter', r.name, r.online, r.error, r.placeholder]),
   ];
   if (cfg.planningCenter) rows.push(['Plans', 'Planning Center', store.service.pco?.ok !== false, store.service.pco?.error]);
   if (!rows.length) return `<p class="muted">No gear added yet.</p><a class="btn primary" href="/gear">${icon('plus')} Add gear</a>`;
-  const ok = rows.filter((r) => r[2]).length;
-  return `<div class="gear-sum ${ok === rows.length ? 'all-ok' : 'some-bad'}"><b>${ok} of ${rows.length}</b> connected</div>
-    <div class="gear-rows">${rows.map(([kind, name, on, err]) => `<div class="gear-row ${on ? 'g-ok' : 'g-bad'}" title="${esc(err || '')}">
-      <span class="dev-dot"></span><span>${esc(name)}</span><small class="muted">${kind}</small><b>${on ? 'Connected' : 'Offline'}</b></div>`).join('')}</div>
+  const live = rows.filter((r) => !r[4]); // placeholders (no IP address yet) don't count
+  const ok = live.filter((r) => r[2]).length;
+  return `<div class="gear-sum ${ok === live.length ? 'all-ok' : 'some-bad'}"><b>${ok} of ${live.length}</b> connected</div>
+    <div class="gear-rows">${rows.map(([kind, name, on, err, ph]) => `<div class="gear-row ${on ? 'g-ok' : ph ? '' : 'g-bad'}" title="${esc(err || '')}">
+      <span class="dev-dot"></span><span>${esc(name)}</span><small class="muted">${kind}</small><b>${on ? 'Connected' : ph ? 'No IP yet' : 'Offline'}</b></div>`).join('')}</div>
     <a class="btn small" href="/gear">Open Gear</a>`;
 }
 

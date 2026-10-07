@@ -82,11 +82,10 @@ function stepGear() {
     if (t.hasAttribute('data-keep')) {
       const d = readForm(adding.kind, addFields);
       if (!d.name) return toast('Give it a name', true);
-      if (d.type !== 'simulator' && !d.host) return toast('Enter its IP address', true);
       draft[adding.key].push(d);
       stepGear();
     }
-    if (t.hasAttribute('data-cancel')) addBox.classList.add('hidden');
+    if (t.hasAttribute('data-cancel')) { addBox.classList.add('hidden'); addFields.innerHTML = ''; }
     if (t.dataset.rm) { draft[t.dataset.rm].splice(Number(t.dataset.i), 1); stepGear(); }
     if (t.hasAttribute('data-sim')) {
       draft.receivers.push({ name: 'Simulated rack', type: 'simulator', channels: [{ label: 'HH 1', kind: 'handheld' }, { label: 'HH 2', kind: 'handheld' }, { label: 'Pastor HS', kind: 'headset' }, { label: 'Lav 1', kind: 'lav' }] });

@@ -208,7 +208,7 @@ $('access').addEventListener('click', (e) => {
 let chDraft = null;
 function renderChannels() {
   const list = chDraft || state.channels;
-  setHTML($('channels'), `<div class="ch-list">${list.map((c, i) => `<div class="ch-row" data-i="${i}">
+  setHTML($('channels'), `<div class="cch-list">${list.map((c, i) => `<div class="cch-row" data-i="${i}">
       <input type="color" value="${esc(c.color)}" data-k="color" aria-label="Colour"><input type="text" value="${esc(c.name)}" data-k="name" maxlength="30" aria-label="Channel name">
       <button class="btn small danger" data-del aria-label="Delete channel">✕</button></div>`).join('')}</div>
     <div class="row-btns" id="ch-btns">${chButtons()}</div>`);

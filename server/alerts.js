@@ -9,12 +9,15 @@ export function computeAlerts(state, greenroom, mics, cfg) {
   const push = (level, key, text) => out.push({ level, key, text });
 
   for (const rx of Object.values(state.receivers)) {
+    if (rx.placeholder) continue; // added ahead of time, no IP address yet
     if (!rx.online) push('critical', `rx:${rx.id}`, `Receiver "${rx.name}" offline${rx.error ? ` (${rx.error})` : ''}`);
   }
   for (const pp of Object.values(state.propresenter)) {
+    if (pp.placeholder) continue;
     if (!pp.online) push('serious', `pp:${pp.id}`, `ProPresenter "${pp.name}" not responding`);
   }
   for (const sw of Object.values(state.switchers)) {
+    if (sw.placeholder) continue;
     if (!sw.online) push('warning', `sw:${sw.id}`, `Switcher "${sw.name}" offline${sw.error ? ` (${sw.error})` : ''}`);
     else if (sw.ftb) push('warning', `ftb:${sw.id}`, `${sw.name}: Fade to black is ON`);
   }

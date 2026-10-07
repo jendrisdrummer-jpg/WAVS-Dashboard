@@ -50,6 +50,21 @@ export class Runtime extends EventEmitter {
     this.buildDevices();
   }
 
+  /** Real drivers for devices with an address; a placeholder for ones still waiting for their IP. */
+  driver(section, Driver, cfg) {
+    if (cfg.type === 'simulator' || cfg.host) return new Driver(cfg, this.hub, micIdFor);
+    const { hub } = this;
+    return {
+      start() {
+        hub.update(section, cfg.id, { name: cfg.name || cfg.id, type: cfg.type, host: '', online: false, placeholder: true, error: 'No IP address yet. Add it on the Gear page.' });
+        for (let ch = 1; section === 'receivers' && ch <= cfg.channels; ch++) hub.update('mics', micIdFor(cfg.id, ch), { online: false });
+      },
+      stop() {},
+      async thumbnail() { return null; },
+      async setStageMessage() { throw new Error(`${cfg.name} has no IP address yet`); },
+    };
+  }
+
   buildDevices() {
     const s = this.settings;
     this.micSlots = [];
@@ -68,10 +83,10 @@ export class Runtime extends EventEmitter {
           hidden: Boolean(slot.hidden),
         });
       });
-      this.receivers[rx.id] = new Driver({ ...rx, channels: rx.channels.length }, this.hub, micIdFor);
+      this.receivers[rx.id] = this.driver('receivers', Driver, { ...rx, channels: rx.channels.length });
     }
-    this.propresenters = Object.fromEntries(s.propresenter.map((pp) => [pp.id, new PP_DRIVERS[pp.type](pp, this.hub)]));
-    this.switchers = Object.fromEntries(s.switchers.map((sw) => [sw.id, new SWITCHER_DRIVERS[sw.type](sw, this.hub)]));
+    this.propresenters = Object.fromEntries(s.propresenter.map((pp) => [pp.id, this.driver('propresenter', PP_DRIVERS[pp.type], pp)]));
+    this.switchers = Object.fromEntries(s.switchers.map((sw) => [sw.id, this.driver('switchers', SWITCHER_DRIVERS[sw.type], sw)]));
   }
 
   devices() { return [...Object.values(this.receivers), ...Object.values(this.propresenters), ...Object.values(this.switchers)]; }

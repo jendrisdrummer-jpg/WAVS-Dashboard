@@ -37,9 +37,10 @@ function uniqueIds(list) {
   return list;
 }
 
+/** An IP or host name. Empty is allowed: the device is a placeholder until its address is added. */
 function host(v, what) {
   const h = str(v, 120);
-  if (!h) throw new Error(`${what}: an IP address or host name is required`);
+  if (!h) return '';
   if (!isHost(h)) throw new Error(`${what}: "${h}" doesn't look like an IP address or host name`);
   return h;
 }

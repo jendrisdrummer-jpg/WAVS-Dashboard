@@ -14,7 +14,16 @@
         <p class="muted" id="summary">Checking connections…</p>
       </div>
       <div class="row-btns">
-        <button class="btn" id="reconnect" type="button">Reconnect everything</button>
+        <button class="btn small hidden" id="reconnect" type="button" title="Drop and re-open every connection">Reconnect all</button>
+        <div class="add-gear">
+          <button class="btn primary big" id="add-gear" type="button" aria-haspopup="menu" aria-expanded="false">+ Add gear</button>
+          <div class="add-gear-menu hidden" role="menu" id="add-gear-menu">
+            <button role="menuitem" data-add="receiver"><b>Wireless receiver</b><small>Shure SLX-D, ULX-D, QLX-D, Axient</small></button>
+            <button role="menuitem" data-add="switcher"><b>Switcher</b><small>Blackmagic ATEM or vMix</small></button>
+            <button role="menuitem" data-add="propresenter"><b>ProPresenter</b><small>Slides, playlist and timers</small></button>
+            <button role="menuitem" data-add="video"><b>Video source</b><small>Capture card or stream (program, multiview)</small></button>
+          </div>
+        </div>
       </div>
     </div>
     <div id="sections" class="gear-sections"></div>
