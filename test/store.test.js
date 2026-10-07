@@ -17,6 +17,8 @@ test('people: face positions follow the photo, and a hand-set one is kept', () =
 
     st.setFace(p.id, { photo: 'a.jpg', face: auto });
     assert.deepEqual(st.person(p.id).face, { photo: 'a.jpg', ...auto, by: 'auto' });
+    st.setFace(p.id, { photo: 'a.jpg', face: { ...auto, v: 2 } }); // keeps which finder measured it
+    assert.equal(st.person(p.id).face.v, 2);
 
     st.setFace(p.id, { photo: 'a.jpg', face: { x: 0.4, y: 0.3, s: 0.2, ar: 0.75 }, manual: true });
     st.setFace(p.id, { photo: 'a.jpg', face: auto }); // an automatic pass doesn't undo a hand-set one

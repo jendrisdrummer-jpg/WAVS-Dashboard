@@ -13,6 +13,7 @@ import { Board, Dashboards } from './collab.js';
 import { defaultDashboards } from './default-dashboards.js';
 import { Comms } from './comms.js';
 import { Streams } from './streams.js';
+import { Schedule } from './schedule.js';
 
 const RECEIVER_DRIVERS = { shure: ShureReceiver, simulator: SimReceiver };
 const PP_DRIVERS = { propresenter: ProPresenter, simulator: SimProPresenter };
@@ -49,6 +50,7 @@ export class Runtime extends EventEmitter {
     // Once accounts exist the PIN no longer opens anything; signed-in roles do instead.
     this.comms = new Comms(dir, { checkPin: (pin) => !accounts() && checkPin(settings.security.adminPin, pin), orgName: settings.org.name });
     this.streams = new Streams(settings.streams || [], this.hub);
+    this.schedule = new Schedule(dir);
     this.alerts = [];
     this.buildDevices();
   }
@@ -104,6 +106,13 @@ export class Runtime extends EventEmitter {
     this.dashboards.on('change', () => send({ type: 'dashboards', dashboards: this.dashboards.list() }));
     this.comms.on('change', () => send({ type: 'comms', comms: this.comms.summary() }));
     this.streams.on('change', (msg) => send({ ...msg, type: `stream-${msg.type}` }));
+    // (Work out when the next service goes live first, so pages can show it right away.)
+    this.schedule.on('change', () => { this.schedule.due(Date.now(), this.liveEnd()); send({ type: 'schedule', schedule: this.schedule.view() }); });
+    // Mic changes made while a service is live are kept with that service.
+    this.store.on('change', (data) => this.schedule.syncLive({
+      name: data.service?.name || undefined,
+      mics: Object.fromEntries(Object.entries(data.assignments).map(([mic, a]) => [mic, { personId: a.personId, note: a.note }])),
+    }));
 
     // Auto-track the service: ProPresenter changing presentation moves the plan along.
     // The cued playlist item is the strongest signal; the presentation name covers
@@ -138,16 +147,71 @@ export class Runtime extends EventEmitter {
     this.service.start().catch((e) => console.error(`[service] ${e.message}`));
     this.alertTimer = setInterval(() => this.refreshAlerts(), 1000);
     this.alertTimer.unref();
+    this.schedule.materialize();
+    this.scheduleTimer = setInterval(() => this.checkSchedule(), 20000);
+    this.scheduleTimer.unref();
+    this.checkSchedule();
+  }
+
+  /** Recurring services for the weeks ahead, and the next service going live by itself. */
+  checkSchedule() {
+    const today = new Date().toDateString();
+    if (this.scheduleDay !== today) { this.scheduleDay = today; this.schedule.materialize(); }
+    const before = this.schedule.switchAt;
+    const due = this.schedule.due(Date.now(), this.liveEnd());
+    if (due) { this.goLive(due.id, 'auto'); return; }
+    if (before !== this.schedule.switchAt) this.emit('message', { type: 'schedule', schedule: this.schedule.view() });
+  }
+
+  /** When the live service is expected to end: its start plus the plan's length (or 75 minutes). */
+  liveEnd() {
+    const live = this.schedule.live();
+    if (!live) return null;
+    const total = (this.service.plan?.items || []).reduce((n, i) => n + (Number(i.length) || 0), 0);
+    return new Date(live.start).getTime() + (total > 0 ? total * 1000 : 75 * 60000);
+  }
+
+  /**
+   * Make a scheduled service the live one: its name, mics (everyone back to "assigned") and notes
+   * go to the green room, its order of service to the service plan, and only its ProPresenter
+   * playlist is followed (if it names one).
+   */
+  goLive(id, by = 'manual', { reloadPlan = true } = {}) {
+    const svc = this.schedule.setLive(id);
+    const slots = new Set(this.micSlots.map((m) => m.id));
+    const now = new Date().toISOString();
+    const assignments = {};
+    const before = by === 'edit' ? this.store.data.assignments : {};
+    for (const [mic, a] of Object.entries(svc.mics || {})) {
+      if (!slots.has(mic) || !this.store.person(a.personId)) continue;
+      const kept = before[mic]?.personId === a.personId ? before[mic] : null; // same person: keep "On stage" etc.
+      assignments[mic] = { personId: a.personId, status: kept?.status || 'assigned', updatedAt: kept?.updatedAt || now, ...(a.note ? { note: a.note } : {}) };
+    }
+    this.store.data.service = { ...this.store.data.service, name: svc.name, notes: svc.notes || '' };
+    this.store.data.assignments = assignments;
+    this.store.save();
+    if (this.settings.control?.pushNamesToReceivers) for (const m of this.micSlots) this.pushName(m.id);
+
+    const p = svc.plan || {};
+    this.service.expectPlaylist(p.playlist);
+    if (!reloadPlan) return svc;
+    const start = svc.start.slice(11, 16);
+    if (p.source === 'manual') this.service.setManual({ title: svc.name, text: p.text, start, date: svc.start.slice(0, 10) });
+    else if (p.source === 'propresenter') this.service.useProPresenter();
+    else if (p.source === 'pco' && p.planId) this.service.selectPco(p.serviceTypeId, p.planId).catch((e) => console.error(`[schedule] ${e.message}`));
+    console.log(`[schedule] live: ${svc.name} (${svc.start.replace('T', ' ')})${by === 'auto' ? ', automatically' : ''}`);
+    return svc;
   }
 
   stop() {
     clearInterval(this.alertTimer);
+    clearInterval(this.scheduleTimer);
     for (const d of this.devices()) d.stop?.();
     this.service.stop();
     this.comms.stop();
     this.streams.stop();
     this.hub.stop();
-    for (const e of [this.store, this.board, this.dashboards]) e.removeAllListeners();
+    for (const e of [this.store, this.board, this.dashboards, this.schedule]) e.removeAllListeners();
     this.removeAllListeners();
   }
 
@@ -162,7 +226,7 @@ export class Runtime extends EventEmitter {
   snapshot() {
     return {
       type: 'snapshot', state: this.hub.state, slots: this.micSlots, greenroom: this.store.data, alerts: this.alerts,
-      service: this.service.state(), board: this.board.data, dashboards: this.dashboards.list(), comms: this.comms.summary(), streams: this.streams.snapshot(),
+      service: this.service.state(), board: this.board.data, dashboards: this.dashboards.list(), comms: this.comms.summary(), streams: this.streams.snapshot(), schedule: this.schedule.view(),
     };
   }
 

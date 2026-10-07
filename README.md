@@ -182,6 +182,33 @@ small screen or make a TV readable from across the room.
 Notes and checklists are shared by name. Two widgets set to the same name, even on different
 dashboards, show and edit the same note.
 
+## Schedule: services planned ahead
+
+The **Schedule** page holds upcoming services, each with its own name and start time, order of
+service, who has which mic, notes, and (optionally) the ProPresenter playlist it uses. Dashboards
+and the comms roster are the same for every service.
+
+- **Events:** "+ Event" groups several services, e.g. a conference's five sessions over three
+  days. **Duplicate** a session to copy its mic plan, then change what's different. Each session
+  shows which mics change from the one before.
+- **Repeating services:** "↻ Repeating service" for e.g. "Sunday 9:00, every week" (or every other
+  week) with the usual mic plan. Each week appears on the schedule, scheduled up to 26 weeks
+  ahead. Change any single week without touching the others; changing the repeating service
+  updates the weeks nobody changed. "↻ Repeat weekly" on a service turns it into one.
+- **Order of service** per service: typed or pasted (Faith Teams, a run sheet), a Planning Center
+  plan (order of service only; mics are planned here), the ProPresenter playlist, or "keep
+  whatever is loaded".
+- **ProPresenter playlist per service** (optional): for a conference with a playlist per session,
+  type its name. While that service is live only that playlist is followed, and Home warns if
+  ProPresenter has a different one open.
+
+**Going live.** The next service goes live by itself 90 minutes before it starts (change it on the
+Schedule page). If the live one is still running then, it waits until that one is planned to end,
+but no later than 15 minutes before the next one starts. **Next service ▶** on the Home page
+switches straight away. Going live loads the service's mics (everyone back to "Assigned"), name,
+notes and order of service. Changes made on Service & People while a service is live are saved
+to it.
+
 ## Service plan and auto-tracking
 
 ### Planning Center Services

@@ -9,6 +9,7 @@ export const store = {
   service: { plan: null, current: null, actuals: {}, upcoming: [], pco: {} },
   board: { notes: {}, checklists: {} },
   dashboards: [],
+  schedule: { services: [], events: [], templates: [], liveId: null, nextId: null, auto: true },
   comms: { engine: false, channels: [], members: [] },
   alerts: [],
   connected: false,
@@ -80,13 +81,14 @@ function connect() {
         store.boot = msg.boot;
         Object.assign(store, {
           state: msg.state, slots: msg.slots, greenroom: msg.greenroom,
-          service: msg.service, board: msg.board, dashboards: msg.dashboards, comms: msg.comms || store.comms, streams: msg.streams || store.streams, ready: true,
+          service: msg.service, board: msg.board, dashboards: msg.dashboards, comms: msg.comms || store.comms, streams: msg.streams || store.streams, schedule: msg.schedule || store.schedule, ready: true,
         });
         setAlerts(msg.alerts);
         break;
       case 'reload': if (!store.holdReload) location.reload(); return; // organization switched or gear changed
       case 'service': store.service = msg.service; break;
       case 'board': store.board = msg.board; break;
+      case 'schedule': store.schedule = msg.schedule; break;
       case 'comms': store.comms = msg.comms; break;
       case 'stream-comments': store.streams.comments = [...store.streams.comments, ...msg.add].slice(-300); break;
       case 'stream-pin': store.streams.pinned = msg.pinned; break;
@@ -149,6 +151,7 @@ function applyTheme(cfg) {
 
 /** Small line icons (24px grid) for the menu and pages. */
 export const ICONS = {
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>',
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
   grid: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/>',
   mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/>',
@@ -171,7 +174,7 @@ export function can(role) {
   if (!a?.enabled) return true;
   return (RANKS[a.role] || 0) >= RANKS[role];
 }
-const PAGE_ROLE = { gear: 'admin', settings: 'admin', welcome: 'admin', admin: 'producer' };
+const PAGE_ROLE = { gear: 'admin', settings: 'admin', welcome: 'admin', admin: 'producer', schedule: 'producer' };
 // Comms control also opens for comms leads on their phones (checked by the comms server), so it's only hidden from the menu.
 const NAV_ROLE = { ...PAGE_ROLE, comms: 'producer' };
 
@@ -181,6 +184,7 @@ export const NAV = [
   ['/greenroom', 'Green Room', 'greenroom', 'mic'],
   ['/rf', 'RF', 'rf', 'rf'],
   ['/gear', 'Gear', 'gear', 'plug'],
+  ['/schedule', 'Schedule', 'schedule', 'calendar'],
   ['/admin', 'Service & People', 'admin', 'list'],
   ['/comms/control', 'Comms', 'comms', 'headset'],
   ['/settings', 'Settings', 'settings', 'settings'],
@@ -284,6 +288,18 @@ function tickClock() {
 }
 
 // ---------------------------------------------------------------- helpers
+
+/**
+ * A random id. crypto.randomUUID() only exists on secure pages (https or localhost), and the
+ * dashboard is usually opened as http://wavs.local or http://192.168…, so build one ourselves.
+ */
+export function uid() {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
 
 export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

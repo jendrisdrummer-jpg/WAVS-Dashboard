@@ -1,6 +1,6 @@
 import { start, store, onRender, esc, avatar, micView, api, toast, STATUS_LABEL, KIND_ICON, battery, fitFace, photoUrl } from './common.js';
 import { colorFor } from './micviews.js';
-import { findFace, scanFaces } from './faces.js';
+import { findFace, scanFaces, faceSummary, scan } from './faces.js';
 import { planSource } from './plan.js';
 
 await start({ page: 'admin' });
@@ -144,6 +144,28 @@ peopleEl.addEventListener('change', async (e) => {
 
 search.oninput = () => { lastPeople = ''; render(); };
 
+// ---------------------------------------------------------------- face status
+
+const faceStatus = document.getElementById('face-status');
+let lastFaceStatus = '';
+function renderFaceStatus() {
+  const f = faceSummary(store.greenroom.people);
+  let html = '';
+  if (scan.busy) html = `🔍 Finding faces… ${scan.done} of ${scan.total}`;
+  else if (scan.error) html = `<span class="bad-text">⚠ ${esc(scan.error)}</span> <button class="btn small" data-faces-again>Try again</button>`;
+  else if (f.photos) {
+    html = `🙂 Faces found in ${f.found} of ${f.photos} photo${f.photos === 1 ? '' : 's'}`;
+    if (f.none.length) html += ` · <span title="${esc(f.none.join(', '))}">not found: ${esc(f.none.slice(0, 3).join(', '))}${f.none.length > 3 ? ` +${f.none.length - 3}` : ''} (use 🎯 Adjust)</span>`;
+    html += ' <button class="btn small" data-faces-again title="Look for the face in every photo again (hand-adjusted ones are kept)">Check photos again</button>';
+  }
+  if (html !== lastFaceStatus) { lastFaceStatus = html; faceStatus.innerHTML = html; }
+}
+faceStatus.addEventListener('click', (e) => {
+  if (!e.target.closest('[data-faces-again]')) return;
+  scan.error = null;
+  scanFaces(store.greenroom.people, { force: true, onChange: renderFaceStatus });
+});
+
 // ---------------------------------------------------------------- face position (photo crops)
 
 /**
@@ -275,7 +297,8 @@ function render() {
       </div>
     </div>`).join('') || `<div class="muted">${g.people.length ? 'No matches.' : 'No people yet – add your worship team, hosts and guests above.'}</div>`;
   if (ph !== lastPeople) { lastPeople = ph; peopleEl.innerHTML = ph; }
-  if (store.connected) scanFaces(g.people);
+  if (store.connected) scanFaces(g.people, { onChange: renderFaceStatus });
+  renderFaceStatus();
 
   const options = [...g.people].sort((a, b) => a.name.localeCompare(b.name));
   const ah = store.slots.map((slot) => {
