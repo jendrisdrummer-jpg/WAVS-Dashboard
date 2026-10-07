@@ -112,6 +112,23 @@ export function normalizeSettings(input) {
     };
   }));
 
+  // Live streams: viewer counts and comments (YouTube API key / Facebook Page token).
+  s.streams = uniqueIds((s.streams || []).map((st, i) => {
+    const platform = ['youtube', 'facebook', 'simulator'].includes(st.platform) ? st.platform : 'youtube';
+    const name = str(st.name, 60) || `${{ youtube: 'YouTube', facebook: 'Facebook', simulator: 'Simulated' }[platform]} ${i + 1}`;
+    if (platform === 'youtube') {
+      if (!str(st.channel, 200)) throw new Error(`${name}: enter your YouTube channel (or a video link)`);
+      if (!str(st.apiKey, 100)) throw new Error(`${name}: a YouTube API key is needed`);
+      return { id: st.id, name, platform, channel: str(st.channel, 200), apiKey: str(st.apiKey, 100) };
+    }
+    if (platform === 'facebook') {
+      if (!str(st.pageId, 60)) throw new Error(`${name}: enter the Facebook Page ID`);
+      if (!str(st.token, 600)) throw new Error(`${name}: a Facebook Page access token is needed`);
+      return { id: st.id, name, platform, pageId: str(st.pageId, 60), token: str(st.token, 600) };
+    }
+    return { id: st.id, name, platform, simPlatform: st.simPlatform === 'facebook' ? 'facebook' : 'youtube' };
+  }));
+
   const pco = s.planningCenter;
   s.planningCenter = pco && str(pco.appId) && str(pco.secret)
     ? { appId: str(pco.appId), secret: str(pco.secret), serviceTypes: (pco.serviceTypes || []).map(String).filter(Boolean) }
@@ -125,6 +142,7 @@ export function maskSettings(s) {
   const out = structuredClone(s);
   if (out.planningCenter) out.planningCenter = { ...out.planningCenter, secret: '••••••••', hasSecret: true };
   if (out.security.adminPin) out.security = { adminPin: null, hasPin: true };
+  out.streams = (out.streams || []).map((st) => ({ ...st, ...(st.apiKey ? { apiKey: '••••••••' } : {}), ...(st.token ? { token: '••••••••' } : {}) }));
   return out;
 }
 
@@ -133,6 +151,13 @@ export function mergeIncoming(saved, incoming) {
   const next = { ...saved, ...incoming };
   if (incoming.planningCenter && incoming.planningCenter.secret === '••••••••') {
     next.planningCenter = { ...incoming.planningCenter, secret: saved.planningCenter?.secret };
+  }
+  // Stream keys come back masked from the browser: keep the saved ones.
+  if (Array.isArray(incoming.streams)) {
+    next.streams = incoming.streams.map((st) => {
+      const old = (saved.streams || []).find((o) => o.id === st.id) || {};
+      return { ...st, ...(st.apiKey === '••••••••' ? { apiKey: old.apiKey } : {}), ...(st.token === '••••••••' ? { token: old.token } : {}) };
+    });
   }
   // The PIN only changes when a new one (or "" to remove it) is sent explicitly.
   next.security = { adminPin: typeof incoming.security?.adminPin === 'string' ? incoming.security.adminPin : saved.security.adminPin };

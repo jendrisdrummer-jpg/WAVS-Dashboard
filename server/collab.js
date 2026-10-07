@@ -92,6 +92,7 @@ export class Dashboards extends JsonFile {
       id: crypto.randomUUID(),
       name: String(name || 'New dashboard').slice(0, 60),
       rows: src?.rows || 12,
+      scale: src?.scale || 100,
       widgets: src ? structuredClone(src.widgets).map((w) => ({ ...w, id: crypto.randomUUID() })) : [],
     };
     d.slug = this.uniqueSlug(d.name);
@@ -100,11 +101,12 @@ export class Dashboards extends JsonFile {
     return d;
   }
 
-  update(id, { name, rows, widgets }) {
+  update(id, { name, rows, scale, widgets }) {
     const d = this.data.dashboards.find((x) => x.id === id);
     if (!d) throw new Error('Dashboard not found');
     if (typeof name === 'string' && name.trim() && name !== d.name) { d.name = name.trim().slice(0, 60); d.slug = this.uniqueSlug(d.name, id); }
     if (Number.isFinite(rows)) d.rows = Math.min(40, Math.max(4, Math.round(rows)));
+    if (Number.isFinite(scale)) d.scale = Math.min(200, Math.max(40, Math.round(scale)));
     if (Array.isArray(widgets)) {
       d.widgets = widgets.slice(0, 80).map((w) => ({
         id: String(w.id || crypto.randomUUID()),

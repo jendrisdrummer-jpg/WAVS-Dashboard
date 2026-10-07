@@ -118,7 +118,9 @@ export class SimProPresenter {
         next: { text: slides[(this.i + 1) % slides.length], notes: '' },
         layers: { video_input: false, media: true, slide: true, announcements: false, props: this.i === 0, messages: false, audio: false },
         screens: { audience: true, stage: true },
-        timers: [{ name: 'Service', time: fmt(left), state: 'running' }, { name: 'Sermon', time: '35:00', state: 'stopped' }],
+        timers: [{ name: 'Service', time: fmt(left), state: 'running' }, { name: 'Sermon', time: '35:00', state: 'stopped' }, { name: 'Walk-in', time: fmt(Math.max(0, 300 - (elapsed % 330))), state: elapsed % 330 < 300 ? 'running' : 'stopped' }],
+        // A countdown video playing on the presentation layer, restarting every 5.5 minutes.
+        media: elapsed % 330 < 300 ? { presentation: { name: 'Countdown 5 min.mp4', playing: true, time: elapsed % 330, duration: 300, at: Date.now() } } : {},
         capture: { status: 'active', destination: 'Disk' },
         look: 'Main',
         videoInputs: ['Camera 1', 'IMAG'],

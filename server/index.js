@@ -317,6 +317,11 @@ app.post('/api/settings/test', need('admin'), wrap(async (req, res) => {
   const { kind, device } = req.body || {};
   const dev = { ...device };
   if (kind === 'planningCenter' && dev.secret === '••••••••') dev.secret = rt.settings.planningCenter?.secret;
+  if (kind === 'stream') {
+    const saved = (rt.settings.streams || []).find((x) => x.id === dev.id) || {};
+    if (dev.apiKey === '••••••••') dev.apiKey = saved.apiKey;
+    if (dev.token === '••••••••') dev.token = saved.token;
+  }
   res.json(await testDevice(kind, dev));
 }));
 app.post('/api/settings/logo', need('admin'), logoUpload.single('logo'), wrap((req, res) => {
@@ -394,6 +399,10 @@ app.get('/api/dashboards', (_req, res) => res.json(rt.dashboards.list()));
 app.post('/api/dashboards', need('producer'), wrap((req, res) => res.json(rt.dashboards.create(req.body || {}))));
 app.put('/api/dashboards/:id', need('producer'), wrap((req, res) => res.json(rt.dashboards.update(req.params.id, req.body || {}))));
 app.delete('/api/dashboards/:id', need('producer'), wrap((req, res) => { rt.dashboards.remove(req.params.id); res.json({ ok: true }); }));
+
+// ---- live streams: pin or hide a comment
+app.post('/api/streams/pin', need('producer'), wrap((req, res) => { rt.streams.pin(req.body?.id || null); res.json({ ok: true }); }));
+app.post('/api/streams/hide', need('producer'), wrap((req, res) => { rt.streams.hide(String(req.body?.id)); res.json({ ok: true }); }));
 
 // ---- ProPresenter
 app.get('/api/propresenter/:id/thumbnail/:uuid/:index', async (req, res) => {

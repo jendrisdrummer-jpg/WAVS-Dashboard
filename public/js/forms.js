@@ -12,7 +12,7 @@ const IP_HINT = 'Leave empty if you don\'t know it yet: it\'s saved as a placeho
 const KINDS = [['handheld', 'Handheld'], ['headset', 'Headset'], ['lav', 'Lav'], ['iem', 'In-ear'], ['instrument', 'Instrument']];
 
 export const KIND_LABEL = {
-  receiver: 'Wireless receiver', switcher: 'Switcher', propresenter: 'ProPresenter', video: 'Video source', planningCenter: 'Planning Center',
+  receiver: 'Wireless receiver', switcher: 'Switcher', propresenter: 'ProPresenter', video: 'Video source', planningCenter: 'Planning Center', stream: 'Live stream',
 };
 
 const opt = (list, v) => list.map(([val, lab]) => `<option value="${esc(val)}" ${String(v ?? '') === String(val) ? 'selected' : ''}>${esc(lab)}</option>`).join('');
@@ -75,6 +75,19 @@ export function deviceForm(kind, d = {}, ctx = {}) {
         <div data-when="capture">${field('Device name contains', input('device', d.device, 'placeholder="UltraStudio, Magewell, Cam Link"'), 'You can also pick the device on the tile itself')}</div>
         <div data-when="url">${field('URL', input('url', d.url, 'placeholder="http://192.168.1.10:8889/program/whep"'))}</div>
         ${field('Show tally from', `<select name="switcher">${opt([['', 'None'], ...(ctx.switchers || []).map((s) => [s.id, s.name])], d.switcher || '')}</select>`)}`;
+    case 'stream':
+      return `
+        ${field('Name', input('name', d.name, 'placeholder="e.g. YouTube, Facebook – Grace Church" required'))}
+        ${field('Platform', `<select name="platform">${opt([['youtube', 'YouTube Live'], ['facebook', 'Facebook Live'], ['simulator', 'Simulated (for testing)']], d.platform || 'youtube')}</select>`)}
+        <div data-when="youtube" class="form">
+          ${field('Channel', input('channel', d.channel, 'placeholder="@gracechurch, a channel link, or a video link"'), 'Your channel finds the live video by itself each week. A video link pins one specific stream.')}
+          ${field('YouTube API key', input('apiKey', d.apiKey, 'autocomplete="off" placeholder="AIza…"'), `Free. <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Google Cloud</a> → create a project → enable <b>YouTube Data API v3</b> → Credentials → <b>Create API key</b>.`)}
+        </div>
+        <div data-when="facebook" class="form">
+          ${field('Facebook Page ID', input('pageId', d.pageId, 'placeholder="e.g. 102938475610293"'), 'Your Page → About → Page transparency (or Settings) shows the Page ID.')}
+          ${field('Page access token', input('token', d.token, 'autocomplete="off"'), `Needs a Facebook app with <b>pages_read_engagement</b> and <b>pages_read_user_content</b>. In <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener">Graph API Explorer</a>, pick your app and Page, add those permissions, generate a token, then make it long-lived (Access Token Debugger → Extend). See the README for step by step.`)}
+        </div>
+        <div data-when="simulator">${field('Looks like', `<select name="simPlatform">${opt([['youtube', 'YouTube'], ['facebook', 'Facebook']], d.simPlatform || 'youtube')}</select>`)}</div>`;
     case 'planningCenter':
       return `
         <p class="muted small">Create a Personal Access Token at <a href="https://api.planningcenteronline.com/oauth/applications" target="_blank" rel="noopener">api.planningcenteronline.com/oauth/applications</a> → Personal Access Tokens, then paste both parts here.</p>
@@ -86,7 +99,7 @@ export function deviceForm(kind, d = {}, ctx = {}) {
 
 /** Wire up dynamic bits (show/hide by type, channel add/remove, model → channel count). */
 export function enhanceForm(kind, root) {
-  const type = root.querySelector('[name=type]');
+  const type = root.querySelector('[name=type]') || root.querySelector('[name=platform]');
   const sync = () => {
     const t = type?.value;
     root.querySelectorAll('[data-when]').forEach((el) => {
@@ -133,6 +146,8 @@ export function readForm(kind, root, existing = {}) {
       return { ...existing, name: v('name'), type: v('type'), host: v('host'), port: Number(v('port')) || 1025 };
     case 'video':
       return { ...existing, label: v('label'), type: v('type'), url: v('url'), device: v('device'), switcher: v('switcher') || undefined };
+    case 'stream':
+      return { ...existing, name: v('name'), platform: v('platform'), channel: v('channel'), apiKey: v('apiKey'), pageId: v('pageId'), token: v('token'), simPlatform: v('simPlatform') };
     case 'planningCenter':
       return { ...existing, appId: v('appId'), secret: root.querySelector('[name=secret]').value };
     default: return existing;

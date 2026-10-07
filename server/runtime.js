@@ -12,6 +12,7 @@ import { ServiceManager } from './service.js';
 import { Board, Dashboards } from './collab.js';
 import { defaultDashboards } from './default-dashboards.js';
 import { Comms } from './comms.js';
+import { Streams } from './streams.js';
 
 const RECEIVER_DRIVERS = { shure: ShureReceiver, simulator: SimReceiver };
 const PP_DRIVERS = { propresenter: ProPresenter, simulator: SimProPresenter };
@@ -47,6 +48,7 @@ export class Runtime extends EventEmitter {
     });
     // Once accounts exist the PIN no longer opens anything; signed-in roles do instead.
     this.comms = new Comms(dir, { checkPin: (pin) => !accounts() && checkPin(settings.security.adminPin, pin), orgName: settings.org.name });
+    this.streams = new Streams(settings.streams || [], this.hub);
     this.alerts = [];
     this.buildDevices();
   }
@@ -101,6 +103,7 @@ export class Runtime extends EventEmitter {
     this.board.on('change', (data) => send({ type: 'board', board: data }));
     this.dashboards.on('change', () => send({ type: 'dashboards', dashboards: this.dashboards.list() }));
     this.comms.on('change', () => send({ type: 'comms', comms: this.comms.summary() }));
+    this.streams.on('change', (msg) => send({ ...msg, type: `stream-${msg.type}` }));
 
     // Auto-track the service: ProPresenter changing presentation moves the plan along.
     // The cued playlist item is the strongest signal; the presentation name covers
@@ -131,6 +134,7 @@ export class Runtime extends EventEmitter {
     });
 
     for (const d of this.devices()) d.start();
+    this.streams.start();
     this.service.start().catch((e) => console.error(`[service] ${e.message}`));
     this.alertTimer = setInterval(() => this.refreshAlerts(), 1000);
     this.alertTimer.unref();
@@ -141,6 +145,7 @@ export class Runtime extends EventEmitter {
     for (const d of this.devices()) d.stop?.();
     this.service.stop();
     this.comms.stop();
+    this.streams.stop();
     this.hub.stop();
     for (const e of [this.store, this.board, this.dashboards]) e.removeAllListeners();
     this.removeAllListeners();
@@ -157,7 +162,7 @@ export class Runtime extends EventEmitter {
   snapshot() {
     return {
       type: 'snapshot', state: this.hub.state, slots: this.micSlots, greenroom: this.store.data, alerts: this.alerts,
-      service: this.service.state(), board: this.board.data, dashboards: this.dashboards.list(), comms: this.comms.summary(),
+      service: this.service.state(), board: this.board.data, dashboards: this.dashboards.list(), comms: this.comms.summary(), streams: this.streams.snapshot(),
     };
   }
 

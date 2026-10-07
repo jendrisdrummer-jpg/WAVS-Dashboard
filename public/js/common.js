@@ -2,7 +2,8 @@
 
 export const store = {
   config: null,
-  state: { receivers: {}, mics: {}, propresenter: {}, switchers: {} },
+  state: { receivers: {}, mics: {}, propresenter: {}, switchers: {}, streams: {} },
+  streams: { comments: [], pinned: null, history: [], peak: 0 },
   slots: [],
   greenroom: { service: {}, people: [], assignments: {} },
   service: { plan: null, current: null, actuals: {}, upcoming: [], pco: {} },
@@ -78,7 +79,7 @@ function connect() {
         store.boot = msg.boot;
         Object.assign(store, {
           state: msg.state, slots: msg.slots, greenroom: msg.greenroom,
-          service: msg.service, board: msg.board, dashboards: msg.dashboards, comms: msg.comms || store.comms, ready: true,
+          service: msg.service, board: msg.board, dashboards: msg.dashboards, comms: msg.comms || store.comms, streams: msg.streams || store.streams, ready: true,
         });
         setAlerts(msg.alerts);
         break;
@@ -86,6 +87,10 @@ function connect() {
       case 'service': store.service = msg.service; break;
       case 'board': store.board = msg.board; break;
       case 'comms': store.comms = msg.comms; break;
+      case 'stream-comments': store.streams.comments = [...store.streams.comments, ...msg.add].slice(-300); break;
+      case 'stream-pin': store.streams.pinned = msg.pinned; break;
+      case 'stream-hide': store.streams.comments = store.streams.comments.filter((c) => c.id !== msg.id); break;
+      case 'stream-history': store.streams.history = msg.history; store.streams.peak = msg.peak; break;
       case 'dashboards': store.dashboards = msg.dashboards; break;
       case 'update':
         if (msg.data) store.state[msg.section][msg.id] = msg.data;

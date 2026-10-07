@@ -93,7 +93,27 @@ async function testPco(cfg) {
   return { ok: true, detail: `Connected. Service types: ${types.map((t) => t.name).join(', ') || 'none'}`, serviceTypes: types };
 }
 
+async function testStream(cfg) {
+  if (cfg.platform === 'simulator') return { ok: true, detail: 'Simulated stream (no account needed)' };
+  if (cfg.platform === 'youtube') {
+    if (!cfg.apiKey || cfg.apiKey === '••••••••') return { ok: false, detail: 'Enter the YouTube API key to test it.' };
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=id&id=dQw4w9WgXcQ&key=${encodeURIComponent(cfg.apiKey)}`, { signal: AbortSignal.timeout(10000) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, detail: `YouTube says: ${d.error?.message || r.status}. Check the key, and that the YouTube Data API v3 is enabled for its project.` };
+    return { ok: true, detail: 'The API key works. Viewers and chat appear when the channel goes live.' };
+  }
+  if (cfg.platform === 'facebook') {
+    if (!cfg.token || cfg.token === '••••••••') return { ok: false, detail: 'Enter the Page access token to test it.' };
+    const r = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.pageId)}?fields=name&access_token=${encodeURIComponent(cfg.token)}`, { signal: AbortSignal.timeout(10000) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error) return { ok: false, detail: `Facebook says: ${d.error?.message || r.status}` };
+    return { ok: true, detail: `Connected to ${d.name}. Viewers and comments appear when the Page goes live.` };
+  }
+  return { ok: false, detail: 'Unknown platform' };
+}
+
 export async function testDevice(kind, cfg) {
+  if (kind === 'stream') { try { return await testStream(cfg); } catch (e) { return { ok: false, detail: friendly(e) }; } }
   if (cfg?.type === 'simulator') return { ok: true, detail: 'Simulated device (no hardware needed)' };
   if (['receiver', 'switcher', 'propresenter'].includes(kind) && !String(cfg?.host || '').trim()) {
     return { ok: false, detail: 'Enter its IP address to test it. You can still save it without one and add the address later.' };

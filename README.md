@@ -107,12 +107,15 @@ Lobby TV or Campus 2. On phones, widgets stack into a single column.
 
 | Category | Widgets |
 |---|---|
-| Service | **Service plan** (planned start times, current item countdown, actual vs planned), **Current item** (big countdown and up next), **Service clock** (countdown to start, time remaining, overrun), **Clock** |
+| Service | **Service plan** (planned start times, current item countdown, actual vs planned), **Service timeline** (a strip of blocks across the top or bottom, one per item with its length, current highlighted with its countdown, then what's next; equal squares or sized by length), **Current item** (big countdown and up next), **Service clock** (countdown to start, time remaining, overrun), **Clock** |
 | Video | **Video feed** (capture card, WebRTC/WHEP, HLS, MJPEG, web page) with PGM/PVW tally overlay |
 | Switcher | **Program / Preview** for any M/E, **Switcher overview** (every M/E with keyers, DSKs, aux outputs, stream/record), **Camera tally** (red on air, green preview, per M/E or all) |
-| Slides | **ProPresenter** (live and next slide, groups, layers, screens, look, recording), **ProPresenter timers**, **Stage message** |
+| Slides | **ProPresenter** (everything in one tile), or pick pieces: **ProPresenter timers** (all, chosen by name, or one **big timer**; red when over), **Video countdown** (time left on the playing video, e.g. a countdown or walk-in video), **Current slide** / **Next slide** (text, optional notes), **ProPresenter playlist**, **ProPresenter status** (screens, layers, recording, look), **Stage message** |
 | Audio & RF | **Mics & gear** in five looks (see below), **RF & batteries** table, **Frequency plot** |
+| Stream | **Live viewers** (total and per platform, peak, last-hour graph), **Stream comments** (YouTube + Facebook in one feed; questions and prayer requests highlighted; filter to just those), **Pinned comment** (big, for a host or confidence screen) |
 | Team | **Alerts**, **Notes** (shared live), **Checklist** (shared live, with sections and progress), **Text**, **Web page** (stream analytics, Resi, encoder status, Companion…) |
+
+**Sizing what's inside a widget.** In **✎ Edit**, every widget has **A− / A+** buttons that shrink or grow everything inside it (text, photos, meters) from 50% to 200%, while it still fills its box. **Content** at the top sets the size for the whole dashboard, and widgets you've adjusted keep their own size. The same setting is also under each widget's ⚙.
 
 ### Mic board
 The **Green Room TV** dashboard and `/greenroom` show one column per mic:
@@ -245,6 +248,32 @@ A web page can't read SDI or NDI directly. Each source in `video.sources` uses o
 | `hls` | Latency doesn't matter | Any `.m3u8` URL |
 | `mjpeg` | A camera or encoder serves MJPEG or JPEG snapshots | Add `refreshMs` for snapshot URLs |
 | `iframe` | Any web page | |
+
+## Live streams: viewers and comments
+
+Add streams on the **Gear** page: **+ Add gear → Live stream**. Each one has a **Test** button. The **Online Host** starter dashboard shows them all.
+
+**YouTube Live** (free):
+1. Go to [Google Cloud Console](https://console.cloud.google.com/), create a project, open **APIs & Services → Library**, and enable **YouTube Data API v3**.
+2. Under **Credentials**, choose **Create credentials → API key**. It's best to restrict the key to the YouTube Data API.
+3. In the dashboard, enter your channel (`@yourchurch` or the channel link) and the key.
+
+The dashboard finds the live video by itself each time you go live; paste a video link instead to follow one specific stream. Viewer counts update about every 20 seconds and chat every 6–10 seconds. A two-hour service uses well under the free daily quota.
+
+**Facebook Live** (needs a Page access token):
+1. At [developers.facebook.com](https://developers.facebook.com/), create an app (type *Business*), with yourself as an admin of the Page.
+2. In [Graph API Explorer](https://developers.facebook.com/tools/explorer/), pick the app. Add the permissions **pages_show_list**, **pages_read_engagement** and **pages_read_user_content**, click **Generate Access Token**, and approve.
+3. Under *User or Page*, choose your Page to get a **Page access token**.
+4. Make it long-lived: paste it into the [Access Token Debugger](https://developers.facebook.com/tools/debug/accesstoken/) and click **Extend Access Token**. A Page token made from a long-lived user token doesn't expire.
+5. Enter the **Page ID** (Page → About) and the token in the dashboard.
+
+Facebook only shows commenters' names to apps with those permissions; otherwise comments appear as "Facebook viewer".
+
+**Comments.** Comments from every platform appear in one feed, each with a YouTube or Facebook badge. Questions (ending in `?`, or starting with who/what/when…) and prayer requests ("pray…") are highlighted and can be filtered. Producers can **📌 pin** a comment so it shows big on any *Pinned comment* widget, or **✕ hide** one from the dashboards (it stays on YouTube or Facebook). Replying from the dashboard isn't supported.
+
+**Subsplash** doesn't offer a public API for live viewer counts or chat, so it can't be connected yet. If you simulcast to YouTube or Facebook, those counts and comments show up. If Subsplash gives you API access, it can be added.
+
+API keys and tokens are stored with the organization's settings and are never sent to browsers.
 
 ## Comms (intercom on phones)
 

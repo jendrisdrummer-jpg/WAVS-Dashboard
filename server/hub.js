@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events';
 export class Hub extends EventEmitter {
   constructor() {
     super();
-    this.state = { receivers: {}, mics: {}, propresenter: {}, switchers: {} };
+    this.state = { receivers: {}, mics: {}, propresenter: {}, switchers: {}, streams: {} };
     this.pendingMeters = {};
     this.timer = setInterval(() => this.flushMeters(), 100);
     this.timer.unref();
