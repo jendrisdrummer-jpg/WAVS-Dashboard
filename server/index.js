@@ -1,4 +1,6 @@
 import http from 'node:http';
+import https from 'node:https';
+import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -8,7 +10,9 @@ import { WebSocketServer } from 'ws';
 
 import { loadConfig, ROOT } from './config.js';
 import { OrgRegistry, maskSettings, mergeIncoming } from './orgs.js';
-import { Runtime } from './runtime.js';
+import { Runtime, checkPin } from './runtime.js';
+import QRCode from 'qrcode';
+import selfsigned from 'selfsigned';
 import { testDevice } from './testers.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
@@ -61,13 +65,9 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '200kb' }));
 
-const requirePin = (req, res, next) => {
-  const pin = rt.settings.security.adminPin;
-  if (!pin) return next();
-  const given = String(req.get('x-admin-pin') || '');
-  const ok = given.length === String(pin).length && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(String(pin)));
-  return ok ? next() : res.status(401).json({ error: 'PIN required' });
-};
+const requirePin = (req, res, next) => (checkPin(rt.settings.security.adminPin, req.get('x-admin-pin'))
+  ? next()
+  : res.status(401).json({ error: 'PIN required' }));
 
 const images = /^image\/(jpeg|png|webp|gif|heic|heif|svg\+xml)$/;
 const upload = multer({
@@ -211,11 +211,30 @@ app.post('/api/propresenter/:id/stage-message', requirePin, wrap(async (req, res
   res.json({ ok: true });
 }));
 
+// ---- comms: join links / QR code for phones
+function lanAddresses() {
+  return Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
+}
+app.get('/api/comms/info', (_req, res) => {
+  const ips = lanAddresses();
+  res.json({
+    httpsPort: tlsPort,
+    joinUrls: ips.map((ip) => `https://${ip}:${tlsPort}/comms`),
+    hostname: os.hostname(),
+  });
+});
+app.get('/api/comms/qr.svg', wrap(async (req, res) => {
+  const url = String(req.query.url || '');
+  if (!/^https?:\/\/[^\s]{1,200}$/.test(url)) throw new Error('Bad URL');
+  res.type('image/svg+xml').send(await QRCode.toString(url, { type: 'svg', margin: 1, color: { dark: '#000000', light: '#ffffff' } }));
+}));
+
 // ---- pages & static files
 const pub = path.join(ROOT, 'public');
 const pages = {
   '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html',
   '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/gear': 'gear.html', '/settings': 'settings.html',
+  '/comms': 'comms.html', '/comms/control': 'comms-control.html', '/comms/engine': 'comms-engine.html',
 };
 for (const [route, file] of Object.entries(pages)) app.get(route, (_req, res) => res.sendFile(path.join(pub, file)));
 app.get('/uploads/:file', (req, res) => res.sendFile(path.join(rt.store.uploads, path.basename(req.params.file)), { maxAge: '1h' }, (e) => e && res.status(404).end()));
@@ -231,7 +250,35 @@ app.use(express.static(pub));
 // ---------------------------------------------------------------- websocket
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ noServer: true }); // dashboards
+const commsWss = new WebSocketServer({ noServer: true }); // phones, comms engine, comms control
+commsWss.on('connection', (ws, req) => rt.comms.attach(ws, req));
+
+function upgrade(req, socket, head) {
+  const { pathname } = new URL(req.url, 'http://x');
+  if (pathname === '/ws') wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  else if (pathname === '/comms-ws') commsWss.handleUpgrade(req, socket, head, (ws) => commsWss.emit('connection', ws, req));
+  else socket.destroy();
+}
+server.on('upgrade', upgrade);
+
+// HTTPS (self-signed) so phones may use their microphone for comms. Browsers only allow
+// microphones on https:// pages (or localhost). The certificate is created once and kept in data/tls/.
+const tlsPort = Number(process.env.HTTPS_PORT || cfg.server.httpsPort || 8443);
+async function tlsOptions() {
+  const dir = path.join(dataDir, 'tls');
+  const keyFile = path.join(dir, 'key.pem');
+  const certFile = path.join(dir, 'cert.pem');
+  if (!fs.existsSync(keyFile)) {
+    fs.mkdirSync(dir, { recursive: true });
+    const altNames = [{ type: 2, value: 'localhost' }, { type: 2, value: os.hostname() }, { type: 2, value: `${os.hostname().replace(/\.local$/, '')}.local` },
+      { type: 7, ip: '127.0.0.1' }, ...lanAddresses().map((ip) => ({ type: 7, ip }))];
+    const pems = await selfsigned.generate([{ name: 'commonName', value: 'WAVS Dashboard' }], { days: 3650, keySize: 2048, algorithm: 'sha256', extensions: [{ name: 'subjectAltName', altNames }] });
+    fs.writeFileSync(keyFile, pems.private, { mode: 0o600 });
+    fs.writeFileSync(certFile, pems.cert);
+  }
+  return { key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) };
+}
 
 function broadcast(msg) {
   const data = JSON.stringify(msg);
@@ -258,6 +305,17 @@ server.listen(cfg.server.port, cfg.server.host, () => {
   console.log(`WAVS Dashboard running: http://localhost:${cfg.server.port}`);
   console.log(`  Organizations: ${orgs.list().map((o) => o.name).join(', ')}`);
 });
+if (tlsPort) {
+  tlsOptions().then((opts) => {
+    const secure = https.createServer(opts, app);
+    secure.on('upgrade', upgrade);
+    secure.on('error', (e) => console.error(`[https] ${e.message}`));
+    secure.listen(tlsPort, cfg.server.host, () => {
+      const ips = lanAddresses();
+      console.log(`  Comms for phones: ${ips.length ? ips.map((ip) => `https://${ip}:${tlsPort}/comms`).join('  ') : `https://localhost:${tlsPort}/comms`}`);
+    });
+  }).catch((e) => console.error(`[https] could not start: ${e.message}`));
+}
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {

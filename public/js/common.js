@@ -8,6 +8,7 @@ export const store = {
   service: { plan: null, current: null, actuals: {}, upcoming: [], pco: {} },
   board: { notes: {}, checklists: {} },
   dashboards: [],
+  comms: { engine: false, channels: [], members: [] },
   alerts: [],
   connected: false,
   ready: false,
@@ -66,13 +67,14 @@ function connect() {
       case 'snapshot':
         Object.assign(store, {
           state: msg.state, slots: msg.slots, greenroom: msg.greenroom,
-          service: msg.service, board: msg.board, dashboards: msg.dashboards, ready: true,
+          service: msg.service, board: msg.board, dashboards: msg.dashboards, comms: msg.comms || store.comms, ready: true,
         });
         setAlerts(msg.alerts);
         break;
       case 'reload': if (!store.holdReload) location.reload(); return; // organization switched or gear changed
       case 'service': store.service = msg.service; break;
       case 'board': store.board = msg.board; break;
+      case 'comms': store.comms = msg.comms; break;
       case 'dashboards': store.dashboards = msg.dashboards; break;
       case 'update':
         if (msg.data) store.state[msg.section][msg.id] = msg.data;
@@ -140,6 +142,7 @@ export const ICONS = {
   check: '<path d="M20 6L9 17l-5-5"/>',
   x: '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  headset: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="2" y="14" width="5" height="7" rx="2"/><rect x="17" y="14" width="5" height="7" rx="2"/><path d="M20 21a4 4 0 0 1-4 2h-3"/>',
   swap: '<path d="M7 4L3 8l4 4"/><path d="M3 8h14"/><path d="M17 20l4-4-4-4"/><path d="M21 16H7"/>',
 };
 export const icon = (name, cls = 'ic') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -151,6 +154,7 @@ export const NAV = [
   ['/rf', 'RF', 'rf', 'rf'],
   ['/gear', 'Gear', 'gear', 'plug'],
   ['/admin', 'Service & People', 'admin', 'list'],
+  ['/comms/control', 'Comms', 'comms', 'headset'],
   ['/settings', 'Settings', 'settings', 'settings'],
 ];
 

@@ -43,6 +43,9 @@ You don't need to edit a config file.
 | `/admin` | **Service & People**: the order of service (Planning Center, the ProPresenter playlist, or typed in), people and photos, mic assignments. |
 | `/gear` | **Gear**: shows whether each receiver, switcher, ProPresenter and Planning Center is connected. Add, edit, **Test** and remove devices here. |
 | `/settings` | **Settings**: name, colour, logo, admin PIN, Planning Center, alert thresholds, organizations. |
+| `/comms/control` | **Comms**: the team list, who can talk and listen on each channel, cues, and the QR code phones scan to join. |
+| `/comms/engine` | The **comms engine**, which mixes the comms audio. Open it on the dashboard computer and leave it open. |
+| `https://<ip>:8443/comms` | **Comms on a phone**: sign in, then listen and talk. |
 
 ![Home](docs/home.jpg)
 
@@ -232,6 +235,47 @@ A web page can't read SDI or NDI directly. Each source in `video.sources` uses o
 | `hls` | Latency doesn't matter | Any `.m3u8` URL |
 | `mjpeg` | A camera or encoder serves MJPEG or JPEG snapshots | Add `refreshMs` for snapshot URLs |
 | `iframe` | Any web page | |
+
+## Comms (intercom on phones)
+
+Your crew talk and listen through their phone's browser. Nothing needs installing.
+
+**Channels.** Directors, Cam Ops, Lighting, GFX, Audio and Stage come set up. Rename, recolour, add or remove them on the Comms page. Each person has a **T** (talk) and **L** (listen) switch per channel. Phones have a volume slider and a listen switch per channel. **Hold TALK** to talk, or **tap it once** to latch it on and tap again to stop.
+
+**Positions.** Positions (Director, Camera op, GFX / ProPresenter, ...) set the channels a person starts with. Change the defaults under *Position defaults*. Changing someone's position resets their channels to that position's defaults.
+
+**Add your team before the event.** On `/comms/control`, under *People*, type each person's name and pick their position. You can also give them:
+- a **personal code**, so nobody else can sign in as them
+- the **Lead** role. Leads see a *Control* button on their phone. They can manage channels, people and cues, but they can't change sign-in rules or choose leads.
+
+On site, people scan the QR code, type their name (and their code), and arrive in the right channels. Names don't care about capitals or extra spaces.
+
+**Sign-in rules** (producer only):
+- **Only people on the list can sign in** stops walk-ins.
+- A **team password** is one password everyone types, for example from the call sheet.
+
+With both off, anyone on the network can join and pick a position.
+
+**Cues.** Send Standby, GO or a text message to everyone, to one channel, or to one person. Their phone flashes and vibrates. The Comms page shows who tapped *Got it*.
+
+### Setting it up
+1. On the dashboard computer, open **`http://localhost:8080/comms/engine`** in Chrome and click **Start**. Leave the tab open; closing it stops comms. Allow the microphone when asked: that lets phones connect directly, and nothing is recorded.
+2. Phones must be on the **same Wi-Fi/network** as the dashboard computer. They join by scanning the QR code on the Comms page (`https://<computer-ip>:8443/comms`).
+3. Phones only allow the microphone on `https://` pages, so the dashboard runs a second, encrypted port (**8443**) with its own certificate (stored in `data/tls/`). The first time, each phone warns that the connection isn't private:
+   - iPhone: tap **Show Details → visit this website**.
+   - Android: tap **Advanced → Proceed**.
+
+   To skip that warning, use a trusted certificate, for example through Tailscale HTTPS. Change the port with `HTTPS_PORT=...` (`HTTPS_PORT=0` turns it off).
+4. Use headphones. Each phone keeps its screen awake while comms is open.
+
+This is built for **15–20 people** on one computer. Audio goes directly from each phone to the comms engine on your network, not through the internet.
+
+### Behringer WING (or any audio interface)
+Connect the WING to the dashboard computer over USB. On the comms engine page, under **Audio interface**:
+- **Input from console**: choose the WING, a USB channel and the comms channels it feeds. For example, WING talkback on USB 1 goes into **GFX**.
+- **Output to console**: choose the WING, a USB channel and the comms channels it carries. For example, Directors goes to USB 3, which you route to a WING bus.
+
+Chrome sometimes only reads the first 2 input channels of an interface. If so, send the talkback to USB 1 or 2.
 
 ## Alerts
 These alerts appear on every page, and critical ones play a chime:

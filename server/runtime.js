@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { Hub } from './hub.js';
 import { GreenroomStore } from './store.js';
@@ -10,11 +11,20 @@ import { PlanningCenter } from './drivers/planningcenter.js';
 import { ServiceManager } from './service.js';
 import { Board, Dashboards } from './collab.js';
 import { defaultDashboards } from './default-dashboards.js';
+import { Comms } from './comms.js';
 
 const RECEIVER_DRIVERS = { shure: ShureReceiver, simulator: SimReceiver };
 const PP_DRIVERS = { propresenter: ProPresenter, simulator: SimProPresenter };
 const SWITCHER_DRIVERS = { atem: AtemSwitcher, vmix: VmixSwitcher, simulator: SimSwitcher };
 export const micIdFor = (rxId, ch) => `${rxId}.${ch}`;
+
+/** Constant-time PIN check; true when the organization has no PIN. */
+export function checkPin(expected, given) {
+  if (!expected) return true;
+  const a = Buffer.from(String(given ?? ''));
+  const b = Buffer.from(String(expected));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 /**
  * Everything that belongs to the active organization: gear connections, people,
@@ -35,6 +45,7 @@ export class Runtime extends EventEmitter {
       pco: settings.planningCenter ? new PlanningCenter(settings.planningCenter) : null,
       cfg: settings.service,
     });
+    this.comms = new Comms(dir, { checkPin: (pin) => checkPin(settings.security.adminPin, pin), orgName: settings.org.name });
     this.alerts = [];
     this.buildDevices();
   }
@@ -73,6 +84,7 @@ export class Runtime extends EventEmitter {
     this.service.on('change', (data) => send({ type: 'service', service: data }));
     this.board.on('change', (data) => send({ type: 'board', board: data }));
     this.dashboards.on('change', () => send({ type: 'dashboards', dashboards: this.dashboards.list() }));
+    this.comms.on('change', () => send({ type: 'comms', comms: this.comms.summary() }));
 
     // Auto-track the service: ProPresenter changing presentation moves the plan along.
     // The cued playlist item is the strongest signal; the presentation name covers
@@ -112,6 +124,7 @@ export class Runtime extends EventEmitter {
     clearInterval(this.alertTimer);
     for (const d of this.devices()) d.stop?.();
     this.service.stop();
+    this.comms.stop();
     this.hub.stop();
     for (const e of [this.store, this.board, this.dashboards]) e.removeAllListeners();
     this.removeAllListeners();
@@ -128,7 +141,7 @@ export class Runtime extends EventEmitter {
   snapshot() {
     return {
       type: 'snapshot', state: this.hub.state, slots: this.micSlots, greenroom: this.store.data, alerts: this.alerts,
-      service: this.service.state(), board: this.board.data, dashboards: this.dashboards.list(),
+      service: this.service.state(), board: this.board.data, dashboards: this.dashboards.list(), comms: this.comms.summary(),
     };
   }
 

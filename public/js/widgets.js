@@ -355,6 +355,26 @@ export const WIDGETS = {
     },
   },
 
+  comms: {
+    title: 'Comms', icon: '🎧', category: 'Team', size: { w: 4, h: 3 },
+    options: [{ key: 'offline', label: 'Also show people who are not connected', type: 'checkbox' }],
+    mount(body, opts) {
+      return {
+        update() {
+          const c = store.comms;
+          const people = c.members.filter((m) => m.online || opts.offline);
+          if (!c.members.length) return setHTML(body, '<div class="w-empty">Nobody on comms yet. <a href="/comms/control">Set up comms</a></div>');
+          const rows = c.channels.map((ch) => {
+            const on = people.filter((m) => m.talking.includes(ch.id));
+            return `<div class="cw-ch" style="--ch:${esc(ch.color)}"><b>${esc(ch.name)}</b>${on.map((m) => `<span class="cw-p live">🗣 ${esc(m.name)}</span>`).join('') || '<small class="muted">quiet</small>'}</div>`;
+          }).join('');
+          setHTML(body, `<div class="cw">${c.engine ? '' : '<span class="alert critical">Comms engine is not running</span>'}${rows}
+            <div class="chips">${people.map((m) => `<span class="cw-p ${m.online ? '' : 'muted'}" title="${esc(m.position)}">${m.online ? '●' : '○'} ${esc(m.name)}${m.muted ? ' (muted)' : ''}</span>`).join('')}</div></div>`);
+        },
+      };
+    },
+  },
+
   notes: {
     title: 'Notes', icon: '📝', category: 'Team', size: { w: 4, h: 3 },
     options: [{ key: 'name', label: 'Shared note name (same name = same note everywhere)', type: 'text', default: 'main' }],
