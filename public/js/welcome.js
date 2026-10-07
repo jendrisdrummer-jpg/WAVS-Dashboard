@@ -28,6 +28,7 @@ function stepOrg() {
   card.innerHTML = `<form class="form">
     <h1>Welcome to your production dashboard</h1>
     <p class="muted">Let's set it up for your team. It takes about two minutes, and you can change everything later in Settings.</p>
+    <p class="muted small">Moving from another computer? <a href="/settings#move">Import its backup</a> instead.</p>
     <label class="f"><span>Organization name</span><input type="text" name="name" required maxlength="60" value="${esc(draft.org.name)}" placeholder="e.g. Grace Church or Acme Productions"></label>
     <div class="f"><span>Colour</span><div class="swatches">${COLORS.map((c) => `<button type="button" class="swatch-btn ${c === draft.org.theme.accent ? 'on' : ''}" style="background:${c}" data-c="${c}" aria-label="${c}"></button>`).join('')}</div></div>
     <label class="f"><span>Usual service or event name (optional)</span><input type="text" name="serviceName" maxlength="80" value="${esc(draft.org.serviceName || '')}" placeholder="Sunday 9:00"></label>

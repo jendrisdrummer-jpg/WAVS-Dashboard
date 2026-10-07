@@ -245,6 +245,11 @@ async function drawComputer() {
         <div>${svc.running ? '<b class="ok">✓ Yes</b>: running in the background, starts when this computer logs in'
           : svc.installed ? '<b>Set up</b>, but this copy was started from Terminal'
           : `<b>No</b>: it only runs while Terminal is open.<br><small class="muted">To fix that, open the dashboard folder (<span class="mono">${esc(sys.root)}</span>) and ${svc.platform === 'linux' ? 'run <span class="mono">npm run service:install</span> there once' : `double-click <b>${mac ? 'Install WAVS Dashboard (Mac).command' : 'Install WAVS Dashboard (Windows).cmd'}</b> once`}.</small>`}</div></div>
+      <div><small class="muted">This computer's name</small>
+        <form class="name-form" id="name-form"><input type="text" name="name" value="${esc(sys.computerName || 'wavs')}" maxlength="40" ${sys.nameFixed ? 'disabled' : ''} aria-label="Computer name"><span class="muted">.local</span>
+          <button class="btn small" ${sys.nameFixed ? 'disabled' : ''}>Save</button></form>
+        ${sys.nameConflict ? `<small class="over">⚠ Another device (${esc(sys.nameConflict)}) already uses this name. Pick a different one.</small>`
+          : '<small class="muted">Each host computer needs its own name, e.g. <b>wavs</b> on your Mac and <b>grace</b> at church.</small>'}</div>
       <div><small class="muted">Version</small>
         <div>${sys.commit ? `<span class="mono">${esc(sys.commit)}</span> · ${esc(sys.date)}` : esc(sys.version)}</div></div>
     </div>
@@ -265,6 +270,16 @@ function updText() {
   return `<b>What's new:</b><ul class="upd-list">${upd.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
     ${sys.service.running ? '' : '<span class="muted">After updating, restart the dashboard (in Terminal: Control + C, then npm start).</span>'}`;
 }
+
+comp.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'name-form') return;
+  e.preventDefault();
+  try {
+    const r = await api('PUT', '/api/system/name', { name: e.target.elements.name.value });
+    toast(r.conflict ? `Saved, but another device already uses ${r.name}.local` : `This computer is now http://${r.name}.local`, Boolean(r.conflict));
+    drawComputer();
+  } catch (err) { toast(err.message, true); }
+});
 
 comp.addEventListener('click', async (e) => {
   if (e.target.id === 'check-upd') {
@@ -295,3 +310,93 @@ comp.addEventListener('click', async (e) => {
   }
 });
 drawComputer();
+
+// ---------------------------------------------------------------- move to another computer
+const move = document.getElementById('move-body');
+let imp = null; // { token, orgs, needsPassword, password, result }
+
+function drawMove() {
+  const mine = cfg.orgs.filter((o) => !cfg.auth?.enabled || cfg.auth.user?.owner || cfg.auth.user?.roles?.[o.id] === 'admin');
+  move.innerHTML = `
+    <p class="muted small">Host on a different computer (for example the church's computer instead of your Mac): download a backup here, then import it on the other computer in <b>Settings → Move to another computer</b>. It includes gear, people and photos, dashboards, plans, comms, branding and the accounts that can use them. Several computers can host at the same time, each with its own organizations and name.</p>
+    <div class="move-cols">
+      <form class="form" id="export-form">
+        <b>1. Download a backup</b>
+        <div class="move-orgs">${mine.map((o) => `<label class="cb"><input type="checkbox" name="org" value="${esc(o.id)}" ${o.id === cfg.orgId ? 'checked' : ''}> ${esc(o.name)}</label>`).join('')}</div>
+        <label class="f"><span>Protect it with a password (recommended)</span><input type="password" name="password" autocomplete="new-password" placeholder="Leave empty for no password"></label>
+        <small class="muted">The file holds your Planning Center key and everyone's (scrambled) passwords. Keep it private.</small>
+        <div class="row-btns"><button class="btn primary">Download backup</button></div>
+      </form>
+      <form class="form" id="import-form">
+        <b>2. Import on this computer</b>
+        ${!imp ? `<label class="btn"><input type="file" id="import-file" accept=".wavsbackup,application/octet-stream" hidden>Choose backup file…</label>`
+          : imp.result ? importResult()
+          : imp.needsPassword ? `<label class="f"><span>This backup has a password</span><input type="password" id="import-pw" autocomplete="off"></label>
+              ${imp.error ? `<small class="over">${esc(imp.error)}</small>` : ''}
+              <div class="row-btns"><button class="btn primary" type="button" id="import-unlock">Open</button><button class="btn" type="button" id="import-cancel">Cancel</button></div>`
+          : `<div class="move-orgs">${imp.orgs.map((o) => `<div class="move-org"><b>${esc(o.name)}</b> <small class="muted">${o.files} files</small>
+                <select data-choice="${esc(o.id)}">${o.exists
+                  ? `<option value="replace">Replace the one on this computer</option><option value="new">Add as a separate copy</option><option value="skip">Skip</option>`
+                  : '<option value="new">Add</option><option value="skip">Skip</option>'}</select></div>`).join('')}</div>
+              <small class="muted">Backup from ${new Date(imp.createdAt).toLocaleString()} · ${imp.users} account${imp.users === 1 ? '' : 's'}. Accounts that already exist here keep their password here.</small>
+              <div class="row-btns"><button class="btn primary" type="button" id="import-go">Import</button><button class="btn" type="button" id="import-cancel">Cancel</button></div>`}
+      </form>
+    </div>`;
+}
+
+function importResult() {
+  const r = imp.result;
+  return `<div class="ok"><b>✓ Imported</b></div><ul class="small">${r.imported.map((o) => `<li>${esc(o.name)} (${o.mode === 'replace' ? 'replaced' : 'added'})</li>`).join('')}
+      <li>${r.users.added} account${r.users.added === 1 ? '' : 's'} added, ${r.users.updated} updated</li></ul>
+    <p class="small muted">Switch to it with the organization menu at the top left. The gear's IP addresses came along; if this computer is at a different venue, check the <b>Gear</b> page.</p>
+    ${r.signInNeeded ? '<a class="btn primary" href="/login">Sign in with your account</a>' : '<button class="btn" type="button" id="import-cancel">Done</button>'}`;
+}
+
+move.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (e.target.id !== 'export-form') return;
+  const f = e.target;
+  const ids = [...f.querySelectorAll('[name=org]:checked')].map((x) => x.value);
+  if (!ids.length) return toast('Pick at least one organization', true);
+  try {
+    const res = await fetch('/api/backup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orgs: ids, password: f.elements.password.value }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Backup failed');
+    const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'WAVS backup.wavsbackup';
+    const url = URL.createObjectURL(await res.blob());
+    Object.assign(document.createElement('a'), { href: url, download: name }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('Backup downloaded');
+  } catch (err) { toast(err.message, true); }
+});
+
+async function inspect(file, password = '') {
+  const res = await fetch('/api/backup/inspect', { method: 'POST', headers: { 'content-type': 'application/octet-stream', ...(password ? { 'x-backup-password': password } : {}) }, body: file });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || 'Could not read that file');
+  return d;
+}
+
+move.addEventListener('change', async (e) => {
+  if (e.target.id !== 'import-file' || !e.target.files[0]) return;
+  const file = e.target.files[0];
+  try { imp = { ...(await inspect(file)), file }; } catch (err) { toast(err.message, true); imp = null; }
+  drawMove();
+});
+move.addEventListener('click', async (e) => {
+  if (e.target.id === 'import-cancel') { imp = null; drawMove(); }
+  if (e.target.id === 'import-unlock') {
+    const pw = document.getElementById('import-pw').value;
+    try { imp = { ...(await inspect(imp.file, pw)), file: imp.file, password: pw }; } catch (err) { toast(err.message, true); }
+    drawMove();
+  }
+  if (e.target.id === 'import-go') {
+    const choices = Object.fromEntries([...move.querySelectorAll('[data-choice]')].map((s) => [s.dataset.choice, s.value]));
+    if (Object.values(choices).includes('replace') && !confirm('Replace the organization on this computer with the one in the backup? Its current gear, people and dashboards here are overwritten.')) return;
+    store.holdReload = true;
+    try {
+      imp.result = await api('POST', '/api/backup/import', { token: imp.token, password: imp.password || '', choices });
+    } catch (err) { toast(err.message, true); }
+    drawMove();
+  }
+});
+drawMove();

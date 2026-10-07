@@ -388,4 +388,18 @@ While the service is running, `npm start` reports that the dashboard is already 
 
 **Address.** The dashboard announces itself as **wavs.local** on your network (Bonjour/mDNS). It also answers on port 80 when it can, so no `:8080` is needed. Macs, iPhones, iPads and Windows 10+ understand `.local` names; some Android phones don't, so use the IP shown in Settings → This computer for those. To use a different name, set `WAVS_NAME=grace` (then it's `http://grace.local`). Give the computer a fixed IP if Android devices will use it.
 
+**Several host computers.** Any number of computers can host at the same time, for example your Mac for WAVS events and the church's computer for Sunday services. Each one runs its own organizations, accounts and comms. Give each computer its own name in **Settings → This computer** (e.g. `wavs` and `grace`), so they become `http://wavs.local` and `http://grace.local`. If another device already uses the name, Settings warns you. One organization runs live on one host at a time; changes don't sync between hosts.
+
+**Moving an organization to another computer.** In **Settings → Move to another computer**:
+1. On the old host, tick the organizations to move, optionally set a password, and click **Download backup**. You get a `.wavsbackup` file.
+2. On the new host, choose that file under **Import on this computer**. For each organization, choose **Add**, **Replace the one on this computer**, or **Add as a separate copy**.
+
+The file carries:
+- settings and gear
+- people and photos, dashboards, notes and plans
+- comms and the logo
+- the accounts that can use those organizations, so people sign in with the same passwords
+
+An account that already exists on the new computer keeps its password there and just gains the roles. The file holds secrets (the Planning Center key and scrambled passwords), so use a password and keep it private. A new computer can also import a backup straight from the setup wizard ("Moving from another computer?").
+
 **Updating.** In **Settings → This computer**, click **Check for updates**. It lists what's new, and **Update now** downloads and installs it. When the dashboard runs as the service, it restarts by itself and open screens reload. This needs a copy installed with git; ZIP downloads have to be replaced by hand. Your setup lives in the data folder, so updating never touches it.

@@ -17,7 +17,8 @@ import { testDevice } from './testers.js';
 import { Tunnel, lanAddresses } from './tunnel.js';
 import { dataDirFor, oldDataCandidates, adoptOldData } from './datadir.js';
 import { Auth, RANK, sessionToken, sessionCookie } from './auth.js';
-import { localName, startLocalName, listenPort80 } from './localname.js';
+import { localName, startLocalName, setLocalName, stopLocalName, listenPort80 } from './localname.js';
+import { createBackup, readBackup, importBackup, isEncrypted } from './backup.js';
 import { System } from './system.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
@@ -223,12 +224,61 @@ app.get('/api/system', need('admin'), wrap(async (req, res) => {
     root: ROOT,
     dataDir,
     service: { running: system.asService, installed: system.serviceInstalled(), platform: process.platform },
+    computerName: localName.name,
+    nameConflict: localName.conflict,
+    nameFixed: Boolean(process.env.WAVS_NAME),
     address: {
       name: localName.active ? `http://${localName.host}${localName.port80 || port === 80 ? '' : `:${port}`}` : null,
       ip: lanAddresses()[0] ? `http://${lanAddresses()[0].address}:${port}` : null,
     },
   });
 }));
+app.put('/api/system/name', need('admin'), wrap(async (req, res) => {
+  await setLocalName(req.body?.name);
+  res.json({ name: localName.name, conflict: localName.conflict });
+}));
+
+// ---- move organizations between host computers (backup file)
+app.post('/api/backup', need('admin'), wrap((req, res) => {
+  const ids = (Array.isArray(req.body?.orgs) ? req.body.orgs : [rt.orgId]).map(String);
+  // An admin can take the organizations they're admin of (the owner: all of them).
+  if (auth.enabled) for (const id of ids) if (auth.rank(req.user, id) < RANK.admin) throw new Error("You can only back up organizations you're an admin of");
+  const buf = createBackup({ orgs, auth, orgIds: ids, password: String(req.body?.password || '') });
+  const names = ids.map((id) => orgs.data.orgs.find((o) => o.id === id)?.name || id).join(' + ');
+  const file = `WAVS ${names} ${new Date().toISOString().slice(0, 10)}.wavsbackup`.replace(/[^\w .+-]/g, '');
+  res.set({ 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${file}"` }).send(buf);
+}));
+const pendingImports = new Map(); // token -> { buf, at }
+const rawBody = express.raw({ type: '*/*', limit: '1gb' });
+app.post('/api/backup/inspect', need('admin'), rawBody, wrap((req, res) => {
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || !buf.length) throw new Error('Choose a backup file');
+  for (const [t, p] of pendingImports) if (Date.now() - p.at > 15 * 60000) pendingImports.delete(t);
+  const token = crypto.randomBytes(12).toString('base64url');
+  pendingImports.set(token, { buf, at: Date.now() });
+  let data = null;
+  try { data = readBackup(buf, req.get('x-backup-password') || ''); } catch (e) { if (!e.needsPassword) throw e; return res.json({ token, encrypted: true, needsPassword: true, error: req.get('x-backup-password') ? e.message : null }); }
+  res.json({
+    token, encrypted: isEncrypted(buf), createdAt: data.createdAt,
+    orgs: data.orgs.map((o) => ({ id: o.id, name: o.name, files: Object.keys(o.files).length, exists: orgs.data.orgs.some((x) => x.id === o.id), active: o.id === rt.orgId })),
+    users: (data.users || []).length,
+  });
+}));
+app.post('/api/backup/import', need('admin'), wrap((req, res) => {
+  const p = pendingImports.get(String(req.body?.token));
+  if (!p) throw new Error('Choose the backup file again (it expired)');
+  const data = readBackup(p.buf, String(req.body?.password || ''));
+  const choices = req.body?.choices || {};
+  // Replacing the organization that's running: stop it first so nothing overwrites the new files.
+  const replacingActive = choices[rt.orgId] === 'replace';
+  if (replacingActive) rt.stop();
+  let result;
+  try { result = importBackup({ data, orgs, auth, choices }); } finally { if (replacingActive) startRuntime(); }
+  pendingImports.delete(String(req.body?.token));
+  broadcast({ type: 'reload' });
+  res.json({ ...result, signInNeeded: auth.enabled && !req.user });
+}));
+
 app.post('/api/system/check', need('admin'), wrap(async (_req, res) => res.json(await system.check())));
 app.post('/api/system/update', need('admin'), wrap(async (_req, res) => {
   const r = await system.update();
@@ -503,7 +553,7 @@ server.on('error', (e) => {
 server.listen(cfg.server.port, cfg.server.host, async () => {
   console.log(`WAVS Dashboard running: http://localhost:${cfg.server.port}`);
   console.log(`  Organizations: ${orgs.list().map((o) => o.name).join(', ')}`);
-  await startLocalName();
+  await startLocalName(dataDir);
   // http://wavs.local without ":8080" when port 80 is free (allowed for normal users on macOS).
   if (cfg.server.port !== 80) {
     const plain = http.createServer(app);
@@ -528,7 +578,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     rt?.stop();
     tunnel.stop();
-    localName.stop?.();
+    stopLocalName();
     server.close();
     process.exit(0);
   });
