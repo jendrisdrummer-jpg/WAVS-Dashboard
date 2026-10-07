@@ -354,6 +354,20 @@ API keys and tokens are stored with the organization's settings and are never se
 
 ## Comms (intercom on phones)
 
+**On the phone** (works like a Solidcom headset with channels): the channels are a grid of keys.
+Tap the keys you want to talk on (they light up; your pick is remembered), then use the one big
+button at the bottom: **tap** for an open mic (it reads MIC ON; tap again for MIC OFF) or **hold**
+to talk. The 🔊 corner of each key turns listening on or off, a key glows when someone is talking
+on it, and volumes are under **Mix**.
+
+**Audio in / out (sound board).** Plug an audio interface into the dashboard computer (where the
+comms engine runs) and wire it to the board. On the **Comms** page, under *Audio in / out*: an
+**audio in** brings one interface input (board talkback, program mix, a pastor's mic) into comms
+channels; an **audio out** sends comms channels to one interface output (to record comms, or into
+someone's in-ears). The interfaces listed are the ones the engine computer sees; each row shows
+✓ Working or what went wrong.
+
+
 Your crew talk and listen through their phone's browser. Nothing needs installing.
 
 **Channels.** Directors, Cam Ops, Lighting, GFX, Audio and Stage come set up. Rename, recolour, add or remove them on the Comms page. Each person has a **T** (talk) and **L** (listen) switch per channel. Phones have a volume slider and a listen switch per channel. **Hold TALK** to talk, or **tap it once** to latch it on and tap again to stop.
@@ -395,7 +409,7 @@ With both off, anyone on the network can join and pick a position.
 
 This is built for **15–20 people** on one computer. On the same Wi-Fi, audio goes directly from each phone to the comms engine without going through the internet.
 
-### Behringer WING (or any audio interface)
+### Behringer WING (or any audio interface): details
 Connect the WING to the dashboard computer over USB. On the comms engine page, under **Audio interface**:
 - **Input from console**: choose the WING, a USB channel and the comms channels it feeds. For example, WING talkback on USB 1 goes into **GFX**.
 - **Output to console**: choose the WING, a USB channel and the comms channels it carries. For example, Directors goes to USB 3, which you route to a WING bus.

@@ -73,7 +73,51 @@ document.getElementById('sched').addEventListener('click', async (e) => {
   try { await api('POST', '/api/schedule/next'); toast(`${next.name} is live`); } catch (err) { toast(err.message, true); }
 });
 
+// ---------------------------------------------------------------- setup checklist
+// For admins of a new organization (or a new admin): the steps that make the dashboard useful,
+// ticked off as they're done. Hidden when everything is done, or with "Hide".
+let system = null;
+if (can('admin')) api('GET', '/api/system').then((s) => { system = s; render(); }).catch(() => {});
+const HIDE_CHECK = `wavs-checklist-hidden:${cfg.orgId}`;
+let checkHidden = false;
+try { checkHidden = localStorage.getItem(HIDE_CHECK) === '1'; } catch { /* ignore */ }
+
+function checklist() {
+  const el = document.getElementById('check');
+  if (!can('admin') || checkHidden) { el.classList.add('hidden'); return; }
+  const devices = [...Object.values(store.state.receivers), ...Object.values(store.state.propresenter), ...Object.values(store.state.switchers)];
+  const steps = [
+    ['Add your gear', 'Wireless receivers, ProPresenter, the switcher', '/gear', devices.length > 0],
+    ['Add your team', 'Names and photos for the mic board', '/people', store.greenroom.people.length > 0],
+    ['Plan a service', 'A conference session or a repeating Sunday', '/schedule', store.schedule.services.length > 0],
+    ['Set up comms', 'Channels, positions, who talks to whom', '/comms/control', (store.comms.members || []).length > 0],
+    ['Invite your crew', 'Accounts so people can sign in (Settings → Accounts)', '/settings#accounts', Boolean(cfg.auth?.enabled)],
+    ['Run it in the background', 'Starts with the computer, no Terminal needed', '/settings', Boolean(system?.service?.installed)],
+  ];
+  const done = steps.filter((x) => x[3]).length;
+  if (done === steps.length) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  setHTML(el, `<h2>Getting set up <span class="muted">${done} of ${steps.length} done</span><button class="btn small" data-hide-check>Hide</button></h2>
+    <div class="panel-body check-steps">${steps.map(([t, sub, href, ok]) => `<a class="check-step ${ok ? 'ok' : ''}" href="${href}">
+      <span class="check-box">${ok ? '✓' : ''}</span><span><b>${t}</b><small>${sub}</small></span></a>`).join('')}</div>`);
+}
+document.getElementById('check').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-hide-check]')) return;
+  checkHidden = true;
+  try { localStorage.setItem(HIDE_CHECK, '1'); } catch { /* ignore */ }
+  render();
+});
+
+// Phones: the few things people do from a phone, as big buttons.
+setHTML(document.getElementById('phone-actions'), [
+  ['/comms', 'headset', 'Comms'],
+  ['/greenroom', 'mic', 'Green Room'],
+  ['/admin', 'list', 'Live service', 'producer'],
+  ['/schedule', 'calendar', 'Schedule', 'producer'],
+].filter((l) => !l[3] || can(l[3])).map(([href, ic, label]) => `<a class="phone-act" href="${href}">${icon(ic)}<b>${label}</b></a>`).join(''));
+
 function render() {
+  checklist();
   scheduleCard();
   const svc = store.service;
   const info = currentInfo(svc);
