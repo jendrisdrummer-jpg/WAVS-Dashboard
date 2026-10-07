@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Setup</title>
+  <title>Service &amp; People</title>
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
   <main class="page">
+    <div class="page-head"><div><h1>Service &amp; People</h1><p class="muted">Today's service, the order of service, your team and who has which mic.</p></div></div>
     <div class="panel">
       <h2>Service</h2>
       <form class="panel-body grid" id="service">
@@ -25,6 +26,11 @@
         <section>
           <h3>Planning Center</h3>
           <div id="pco"></div>
+        </section>
+        <section>
+          <h3>ProPresenter playlist</h3>
+          <p class="muted small">No Planning Center? Use the playlist that's active in ProPresenter as the order of service. It advances by itself as the operator cues each item.</p>
+          <div class="row-btns"><button class="btn" id="use-pp" type="button">Use the ProPresenter playlist</button></div>
         </section>
         <section>
           <h3>Type or paste a plan <span class="muted small">(Faith Teams, a PDF run sheet, one-off events)</span></h3>

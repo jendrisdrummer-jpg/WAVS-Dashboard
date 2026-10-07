@@ -13,7 +13,7 @@ import {
 } from './common.js';
 import { buildTile } from './video.js';
 import { spacingConflicts, drawSpectrum, rfRows } from './views.js';
-import { planTiming, currentInfo, serviceClock } from './plan.js';
+import { planTiming, currentInfo, serviceClock, planSource } from './plan.js';
 import { mountMicView, MIC_OPTIONS } from './micviews.js';
 
 const switcherChoices = () => [['', '— none —'], ...store.config.switchers.map((s) => [s.id, s.name])];
@@ -217,13 +217,13 @@ export const WIDGETS = {
             return `<button class="pl-i ${isCur ? 'cur' : ''} ${t.done ? 'done' : ''}" data-item="${esc(it.id)}">
               ${opts.compact ? '' : `<span class="pl-t mono">${t.start ? t.start : ''}</span>`}
               <span class="pl-n">${esc(it.title)}${it.key ? ` <span class="chip">${esc(it.key)}</span>` : ''}</span>
-              <span class="pl-l mono">${isCur ? `<b class="${t.remaining < 0 ? 'over' : ''}">${fmtDuration(t.remaining)}</b>` : actual != null ? `<span class="${over ? 'over' : 'ok'}" title="Actual (planned ${fmtDuration(it.length)})">${fmtDuration(actual)}</span>` : it.length ? fmtDuration(it.length) : ''}</span>
+              <span class="pl-l mono">${isCur ? `<b class="${it.length && t.remaining < 0 ? 'over' : ''}">${fmtDuration(it.length ? t.remaining : -t.remaining)}</b>` : actual != null ? `<span class="${over ? 'over' : 'ok'}" title="Actual (planned ${fmtDuration(it.length)})">${fmtDuration(actual)}</span>` : it.length ? fmtDuration(it.length) : ''}</span>
             </button>`;
           }).join('');
           setHTML(body, `<div class="plan ${opts.compact ? 'compact' : ''}">
             <div class="pl-top">
               <div><b>${esc(svc.plan.title || 'Service')}</b>${svc.plan.seriesTitle ? ` <span class="muted">· ${esc(svc.plan.seriesTitle)}</span>` : ''}
-                <div class="muted small">${esc(svc.plan.dates || '')} · ${svc.source === 'pco' ? 'Planning Center' : 'Manual plan'}${svc.current?.by ? ` · following ${esc({ 'pco-live': 'Services LIVE', propresenter: 'ProPresenter', manual: 'operator' }[svc.current.by] || svc.current.by)}` : ''}</div></div>
+                <div class="muted small">${svc.plan.dates ? `${esc(svc.plan.dates)} · ` : ''}${planSource(svc)}${svc.current?.by ? ` · following ${esc({ 'pco-live': 'Services LIVE', propresenter: 'ProPresenter', manual: 'operator' }[svc.current.by] || svc.current.by)}` : ''}</div></div>
               ${opts.controls === false ? '' : '<div class="row-btns"><button class="btn small" data-step="previous" title="Previous item">◀</button><button class="btn small" data-step="next" title="Next item">▶</button></div>'}
             </div>
             <div class="pl-list">${rows}</div></div>`);
@@ -246,7 +246,7 @@ export const WIDGETS = {
           const info = currentInfo(store.service);
           if (!info) return setHTML(body, empty(store.service.plan ? 'Service not started.<br><small>Pick an item in the plan, advance ProPresenter, or start Services LIVE.</small>' : 'No service plan'));
           const pct = info.item.length ? Math.min(100, (info.elapsed / info.item.length) * 100) : 0;
-          setHTML(body, `<div class="ci ${info.remaining < 0 ? 'overrun' : info.remaining < 30 && info.item.length ? 'soon' : ''}">
+          setHTML(body, `<div class="ci ${info.item.length && info.remaining < 0 ? 'overrun' : info.remaining < 30 && info.item.length ? 'soon' : ''}">
             <div class="ci-title">${esc(info.item.title)}${info.item.key ? ` <span class="chip">${esc(info.item.key)}</span>` : ''}</div>
             <div class="ci-time mono">${info.item.length ? fmtDuration(info.remaining) : fmtDuration(info.elapsed)}</div>
             <div class="ci-sub muted">${info.item.length ? (info.remaining < 0 ? 'over time' : 'remaining') : 'elapsed'}</div>

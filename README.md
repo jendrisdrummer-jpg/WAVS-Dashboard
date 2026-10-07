@@ -25,22 +25,51 @@ npm run demo          # every device simulated, no hardware needed
 # open http://localhost:8080
 ```
 
-To use your own gear:
+To use your own gear, run `npm start` and open http://localhost:8080. A short **setup wizard**
+asks for your organization's name and colour, your gear (each item with a **Test** button) and,
+optionally, Planning Center. Everything can be changed later on the **Gear** and **Settings** pages.
+You don't need to edit a config file.
 
-```bash
-cp config/config.example.yaml config/config.yaml
-# edit IPs, mic labels, video sources, Planning Center token…
-npm start
-```
+![Setup wizard](docs/wizard.jpg)
 
 ## Pages
 
 | URL | What it is |
 |---|---|
-| `/` or `/d/<name>` | **Dashboards.** Pick one from the drop-down in the header. Each screen remembers the last one it showed. |
+| `/` | **Home**: what's on now and up next, the service clock, your dashboards, gear health and alerts. |
+| `/dashboards` or `/d/<name>` | **Dashboards.** Pick one from the drop-down in the header. Each screen remembers the last one it showed. |
 | `/greenroom` | The **mic board**: one tall column per mic with the person's name, photo, battery and a live RF/audio graph, plus **Picked up / On stage / Returned** buttons (`?handoff=1` keeps them on, `?view=cards` for the older card view). |
 | `/rf` | Every receiver channel, plus a frequency plot that flags carriers spaced too closely. |
-| `/admin` | **Setup**: service plan (Planning Center or typed in), people and photos, mic assignments. |
+| `/admin` | **Service & People**: the order of service (Planning Center, the ProPresenter playlist, or typed in), people and photos, mic assignments. |
+| `/gear` | **Gear**: shows whether each receiver, switcher, ProPresenter and Planning Center is connected. Add, edit, **Test** and remove devices here. |
+| `/settings` | **Settings**: name, colour, logo, admin PIN, Planning Center, alert thresholds, organizations. |
+
+![Home](docs/home.jpg)
+
+## Organizations (company and church)
+
+If the same dashboard serves more than one organization, such as your production company at
+events and your church on Sundays, add each as an **organization**. Each one has its own:
+- gear (receivers, switchers, ProPresenter, video sources)
+- people, photos and mic assignments
+- dashboards, notes and checklists
+- service plans and Planning Center account
+- name, colour, logo and admin PIN
+
+The active organization is always shown at the top left, in its colour. Click it to **switch**
+or **add** an organization. Switching changes every connected screen at once, and a new
+organization starts in the setup wizard. Only one organization is active at a time, because it
+controls the gear.
+
+## Gear page
+
+![Gear](docs/gear.jpg)
+
+Every device shows a green or red dot with what it reports, for example
+"Connected · SLXD4D · firmware 2.4 · 3 of 4 transmitters on", or the reason it isn't connected.
+**Test** checks a device without saving anything, and gives plain-language results such as
+"Connection refused: the device is there but not accepting connections on that port".
+Choosing a Shure model fills in the right number of channels.
 
 Add `?kiosk=1` to any URL to hide the header on TVs and confidence monitors. The ⛶ button does
 the same.
@@ -75,7 +104,7 @@ Lobby TV or Campus 2. On phones, widgets stack into a single column.
 ### Mic board
 The **Green Room TV** dashboard and `/greenroom` show one column per mic:
 - **Who:** the person's first name in large type, then their surname and role, with their photo
-  on a coloured glow. You can pick each person's colour on the Setup page (🎨 next to their photo),
+  on a coloured glow. You can pick each person's colour on the Service & People page (🎨 next to their photo),
   otherwise one is picked automatically.
 - **Which mic:** the mic label and its status (Assigned, Picked up, On stage).
 - **Health:** battery in the corner, plus a rolling graph across the bottom. The bars are RF
@@ -117,24 +146,31 @@ dashboards, show and edit the same note.
 ### Planning Center Services
 1. Create a **Personal Access Token** at
    <https://api.planningcenteronline.com/oauth/applications>.
-2. Add it to `config/config.yaml`:
-   ```yaml
-   planningCenter:
-     appId: "…"
-     secret: "…"
-     serviceTypes: []      # optional: only these service type IDs
-   ```
-   You can use the `PCO_APP_ID` and `PCO_SECRET` environment variables instead.
-3. Restart. The next upcoming plan is loaded automatically, and the **Setup** page lists upcoming
+2. Paste the Application ID and Secret into **Settings → Planning Center**, press **Test**, and
+   tick the service types to follow.
+3. The next upcoming plan loads automatically. The **Service & People** page lists upcoming
    plans across your service types so you can switch.
 
 The plan gives you items (songs with keys, headers, lengths), service times, and the current item.
 
+### ProPresenter playlist as the order of service
+No Planning Center? On **Service & People**, press **Use the ProPresenter playlist**. The playlist
+that's active in ProPresenter becomes the order of service, headers included, and it advances as
+the operator cues each item.
+
 ### Which item is "current"
 Whichever of these happens most recently moves the plan along:
-- **ProPresenter**: the operator brings up a song or presentation whose name matches a plan item.
-  For example, "Holy Forever" matches "Holy Forever (Live)". So running ProPresenter as usual
-  tracks the service. Set `service.followProPresenter: false` to turn this off.
+- **ProPresenter playlist**: when the operator cues the next item in the active playlist, the plan
+  moves to the matching item:
+  - by name first, so "Holy Forever" matches "Holy Forever (Live)"
+  - by position if the names differ but the playlist and plan have the same number of items
+- **ProPresenter presentation**: a presentation started from the library, outside the playlist,
+  is matched by name.
+- **Planning Center Services LIVE**: if someone is advancing LIVE, the dashboard follows it.
+- **Manual**: tap an item in the Service plan widget, or use ◀ ▶.
+
+So running ProPresenter as usual keeps everyone on the same page. Turn this off in
+**Settings → Alerts & automation**.
 - **Planning Center Services LIVE**: if someone is advancing LIVE, the dashboard follows it.
 - **Manual**: tap an item in the Service plan widget, or use ◀ ▶.
 
@@ -143,7 +179,7 @@ planned (red if it ran long). That's your "how did Sunday go".
 
 ### Faith Teams and other sources
 Faith Teams' public API covers people and giving, but not service plans. Until it does, use
-**Type or paste a plan** on the Setup page:
+**Use the ProPresenter playlist** or **Type or paste a plan** on the Service & People page:
 
 ```
 # Worship
@@ -208,9 +244,10 @@ These alerts appear on every page, and critical ones play a chime:
 You can change the thresholds under `alerts:` in the config.
 
 ## Tailoring it
-- **Branding**: `org.name`, `org.logo` and `org.theme` (colours). All styling is in `public/css/app.css`.
-- **Security**: set `security.adminPin` to require a PIN for setup and dashboard edits. Moving
-  through the plan, notes and checklists stay open so the whole team can use them.
+- **Branding**: name, colour and logo in **Settings**. All styling is in `public/css/app.css`.
+- **Security**: set an **admin PIN** in Settings. It's then required to change gear, settings,
+  people and dashboards, and to switch organization. Moving through the plan, notes and
+  checklists stay open so the whole team can use them.
 - **New widget**: add an entry to `public/js/widgets.js`. Each widget declares its title, settings
   and a `mount()` function, and it then appears in the builder automatically.
 - **New hardware**: add a driver in `server/drivers/` that calls `hub.update(section, id, data)`,
@@ -232,10 +269,14 @@ You can change the thresholds under `alerts:` in the config.
 - `server/`: Express and WebSocket. All live state sits in one hub. Meters are batched and sent
   10 times per second.
 - `public/`: plain HTML, CSS and JS modules with no build step.
-- `data/`: everything you create (people, photos, dashboards, notes, plan progress) as plain JSON.
-  Back this folder up.
-- `npm test`: tests for the Shure (SLX-D/ULX-D/AD) and vMix parsers, alert rules, plan parsing
-  and auto-tracking.
+- `data/`: everything you create, as plain JSON. `data/orgs.json` lists the organizations, and each
+  one has a folder `data/orgs/<id>/` with its settings (gear, PIN, Planning Center), people and
+  photos, dashboards, notes and plan progress. Back this folder up.
+- `config/config.yaml` is optional and only holds the server port. When this version first
+  starts, the gear and branding from an existing `config.yaml` are imported into the first
+  organization, along with existing people and dashboards.
+- `npm test`: tests for the Shure (SLX-D/ULX-D/AD) and vMix parsers, alert rules, plan parsing,
+  ProPresenter auto-tracking, organizations and settings validation.
 
 ## Running it permanently
 

@@ -32,6 +32,11 @@ export function requestRender() {
 
 export async function start({ page }) {
   store.config = await (await fetch('/api/config')).json();
+  // A new organization goes through the setup wizard first.
+  if (!store.config.setupComplete && !['welcome', 'settings', 'gear'].includes(page)) {
+    location.replace('/welcome');
+    await new Promise(() => {});
+  }
   applyTheme(store.config);
   // ?kiosk=1 hides the header (TVs, confidence monitors); alerts stay visible.
   if (new URLSearchParams(location.search).get('kiosk') === '1') document.body.classList.add('kiosk');
@@ -65,6 +70,7 @@ function connect() {
         });
         setAlerts(msg.alerts);
         break;
+      case 'reload': if (!store.holdReload) location.reload(); return; // organization switched or gear changed
       case 'service': store.service = msg.service; break;
       case 'board': store.board = msg.board; break;
       case 'dashboards': store.dashboards = msg.dashboards; break;
@@ -122,20 +128,53 @@ function applyTheme(cfg) {
   if (t.panel) root.setProperty('--panel', t.panel);
 }
 
+/** Small line icons (24px grid) for the menu and pages. */
+export const ICONS = {
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
+  grid: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/>',
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/>',
+  rf: '<path d="M4.9 19.1a10 10 0 0 1 0-14.2"/><path d="M19.1 4.9a10 10 0 0 1 0 14.2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4"/><circle cx="12" cy="12" r="2"/>',
+  plug: '<path d="M9 2v6"/><path d="M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v5"/>',
+  list: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  check: '<path d="M20 6L9 17l-5-5"/>',
+  x: '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  swap: '<path d="M7 4L3 8l4 4"/><path d="M3 8h14"/><path d="M17 20l4-4-4-4"/><path d="M21 16H7"/>',
+};
+export const icon = (name, cls = 'ic') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+
+export const NAV = [
+  ['/', 'Home', 'home', 'home'],
+  ['/dashboards', 'Dashboards', 'dash', 'grid'],
+  ['/greenroom', 'Green Room', 'greenroom', 'mic'],
+  ['/rf', 'RF', 'rf', 'rf'],
+  ['/gear', 'Gear', 'gear', 'plug'],
+  ['/admin', 'Service & People', 'admin', 'list'],
+  ['/settings', 'Settings', 'settings', 'settings'],
+];
+
 function renderHeader(page) {
   const cfg = store.config;
   const header = document.createElement('header');
+  const badge = cfg.org.logo ? '<img src="/logo" alt="">' : `<span class="org-mark">${esc(initials(cfg.org.name))}</span>`;
   header.innerHTML = `
     <div class="topbar">
-      <div class="brand">
-        ${cfg.org.logo ? '<img src="/logo" alt="">' : ''}
-        <span>${esc(cfg.org.name)}</span>
-        <span class="service" data-service></span>
+      <div class="org-wrap">
+        <button class="org-btn" type="button" aria-haspopup="menu" aria-expanded="false" title="Organization: switch or add">
+          ${badge}<span class="org-text"><b>${esc(cfg.org.name)}</b><small data-service></small></span><span class="caret">▾</span>
+        </button>
+        <div class="org-menu hidden" role="menu">
+          <div class="org-menu-head">Organization</div>
+          ${cfg.orgs.map((o) => `<button role="menuitem" data-org="${esc(o.id)}" class="${o.id === cfg.orgId ? 'cur' : ''}">
+            <span class="org-dot" style="background:${esc(o.color)}"></span>${esc(o.name)}${o.id === cfg.orgId ? icon('check') : ''}</button>`).join('')}
+          <hr><button role="menuitem" data-org-add>${icon('plus')} Add organization</button>
+          <a role="menuitem" href="/settings">${icon('settings')} Organization settings</a>
+        </div>
       </div>
       <div data-slot class="slot"></div>
       <nav class="nav">
-        ${[['/', 'Dashboards', 'dash'], ['/greenroom', 'Green Room', 'greenroom'], ['/rf', 'RF & Batteries', 'rf'], ['/admin', 'Setup', 'admin']]
-          .map(([href, label, id]) => `<a href="${href}" class="${id === page ? 'active' : ''}">${label}</a>`).join('')}
+        ${NAV.map(([href, label, id, ic]) => `<a href="${href}" class="${id === page ? 'active' : ''}" title="${label}">${icon(ic)}<span>${label}</span></a>`).join('')}
       </nav>
       <div class="spacer"></div>
       <div data-slot-right class="slot"></div>
@@ -144,6 +183,26 @@ function renderHeader(page) {
     </div>
     <div class="alertbar" role="status" aria-live="polite"></div>`;
   document.body.prepend(header);
+
+  const btn = header.querySelector('.org-btn');
+  const menu = header.querySelector('.org-menu');
+  const toggle = (open) => { menu.classList.toggle('hidden', !open); btn.setAttribute('aria-expanded', String(open)); };
+  btn.onclick = (e) => { e.stopPropagation(); toggle(menu.classList.contains('hidden')); };
+  document.addEventListener('click', (e) => { if (!menu.contains(e.target)) toggle(false); });
+  menu.addEventListener('click', async (e) => {
+    const sw = e.target.closest('[data-org]');
+    if (sw && sw.dataset.org !== cfg.orgId) {
+      const name = cfg.orgs.find((o) => o.id === sw.dataset.org)?.name;
+      if (!confirm(`Switch to ${name}?\n\nEvery screen will change to ${name}'s gear, people and dashboards.`)) return;
+      try { await api('POST', '/api/orgs/active', { id: sw.dataset.org }); } catch (err) { toast(err.message, true); }
+    }
+    if (e.target.closest('[data-org-add]')) {
+      const name = prompt('Name of the new organization (e.g. "Acme Productions")');
+      if (!name?.trim()) return;
+      try { await api('POST', '/api/orgs', { name: name.trim() }); } catch (err) { toast(err.message, true); }
+    }
+  });
+
   onRender(() => {
     const conn = header.querySelector('[data-conn]');
     conn.classList.toggle('ok', store.connected);

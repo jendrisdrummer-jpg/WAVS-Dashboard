@@ -34,3 +34,29 @@ test('follows ProPresenter by presentation name and records actual item times', 
   assert.ok(song.id in svc.saved.actuals, 'time on the song is recorded when moving on');
   assert.equal(normalize('Holy Forever (Live)'), 'holy forever');
 });
+
+test('follows the cued ProPresenter playlist item, by name or by position', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wavs-'));
+  const svc = new ServiceManager({ dataDir: dir, pco: null, cfg: {} });
+  svc.setManual({ title: 'Sunday', text: '5:00 Welcome\nsong 4:30 Holy Forever\n35m Message' });
+  const pl = (index, names) => ({ uuid: 'p1', name: 'Sunday', index, items: names.map((n) => ({ name: n, type: n.startsWith('#') ? 'header' : 'presentation' })) });
+
+  // Same names: match by name.
+  svc.onPlaylist(pl(2, ['Welcome', '# Worship', 'Holy Forever (Live)', 'Message']));
+  assert.equal(svc.plan.items.find((i) => i.id === svc.saved.current.itemId).title, 'Holy Forever');
+
+  // Different names but same number of items: follow by position.
+  svc.onPlaylist(pl(3, ['Walk in', '# Worship', 'Song A', 'Sermon']));
+  assert.equal(svc.plan.items.find((i) => i.id === svc.saved.current.itemId).title, 'Message');
+});
+
+test('uses the ProPresenter playlist as the order of service', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wavs-'));
+  const svc = new ServiceManager({ dataDir: dir, pco: null, cfg: {} });
+  svc.useProPresenter();
+  svc.onPlaylist({ uuid: 'p1', name: 'Sunday Service', index: 2, items: [{ name: 'Walk-in', type: 'media' }, { name: 'Worship', type: 'header' }, { name: 'Holy Forever', type: 'presentation' }] });
+  assert.equal(svc.plan.title, 'Sunday Service');
+  assert.equal(svc.plan.items.length, 3);
+  assert.equal(svc.plan.items[1].type, 'header');
+  assert.equal(svc.saved.current.itemId, 'p1:2');
+});

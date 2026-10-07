@@ -310,3 +310,5 @@ onMeters(() => { for (const w of live.values()) w.inst?.meters?.(); });
 setInterval(() => { for (const w of live.values()) w.inst?.update?.(); }, 1000);
 
 go(pickDashboard());
+// From Home → "New dashboard"
+if (new URLSearchParams(location.search).has('new')) createDashboard('New dashboard');

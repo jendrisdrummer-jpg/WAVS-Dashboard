@@ -43,7 +43,7 @@ export class ProPresenter {
       if (!version) throw new Error('No response from /version');
       this.version = version;
 
-      const [slide, slideIndex, layers, audience, stage, timers, capture] = await Promise.all([
+      const [slide, slideIndex, layers, audience, stage, timers, capture, activePl] = await Promise.all([
         this.opt('/v1/status/slide'),
         this.opt('/v1/presentation/slide_index'),
         this.opt('/v1/status/layers'),
@@ -51,7 +51,28 @@ export class ProPresenter {
         this.opt('/v1/status/stage_screens'),
         this.opt('/v1/timers/current'),
         this.opt('/v1/capture/status'),
+        this.opt('/v1/playlist/active'),
       ]);
+
+      // Active playlist and the item that's cued in it (drives the service plan).
+      const plId = activePl?.presentation?.playlist;
+      const plItem = activePl?.presentation?.item;
+      if (plId?.uuid && (plId.uuid !== this.playlistUuid || this.slow === 0)) {
+        const pl = await this.opt(`/v1/playlist/${encodeURIComponent(plId.uuid)}`);
+        this.playlistUuid = plId.uuid;
+        this.playlistItems = Array.isArray(pl?.items)
+          ? pl.items.filter((it) => !it.is_hidden).map((it) => ({ name: it.id?.name || '', type: it.type || 'presentation', uuid: it.id?.uuid || null }))
+          : [];
+      }
+      const playlist = plId?.uuid ? {
+        uuid: plId.uuid,
+        name: plId.name || 'Playlist',
+        items: this.playlistItems || [],
+        // Match by uuid first (hidden items shift indexes), then fall back to the reported index.
+        index: plItem ? Math.max(-1, (this.playlistItems || []).findIndex((it) => it.uuid && it.uuid === plItem.uuid)) : -1,
+        itemName: plItem?.name || null,
+      } : null;
+      if (playlist && playlist.index === -1 && Number.isInteger(plItem?.index)) playlist.index = plItem.index;
 
       const idx = slideIndex?.presentation_index;
       const presId = idx?.presentation_id;
@@ -86,6 +107,7 @@ export class ProPresenter {
         screens: { audience: typeof audience === 'boolean' ? audience : null, stage: typeof stage === 'boolean' ? stage : null },
         timers: Array.isArray(timers) ? timers.map((t) => ({ name: t?.id?.name, time: t?.time, state: t?.state })) : [],
         capture: capture && typeof capture === 'object' ? { status: capture.status, destination: capture.capture_destination || null } : null,
+        playlist,
         ...this.slowData,
       });
     } catch (err) {

@@ -52,3 +52,8 @@ export function serviceClock(svc, now = Date.now()) {
   }
   return { label: 'Over planned end by', seconds: (now - t.end) / 1000, tone: 'bad', sub: `planned end ${hhmm(new Date(t.end))}` };
 }
+
+/** Where the order of service comes from, in words. */
+export function planSource(svc) {
+  return { pco: 'Planning Center', manual: 'Manual plan', propresenter: 'ProPresenter playlist' }[svc.source] || 'Plan';
+}
