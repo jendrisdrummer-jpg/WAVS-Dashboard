@@ -43,6 +43,7 @@ export class ProPresenter {
       if (!version) throw new Error('No response from /version');
       this.version = version;
 
+      const media = await this.media();
       const [slide, slideIndex, layers, audience, stage, timers, capture, activePl] = await Promise.all([
         this.opt('/v1/status/slide'),
         this.opt('/v1/presentation/slide_index'),
@@ -106,6 +107,7 @@ export class ProPresenter {
         layers: layers && typeof layers === 'object' ? layers : null,
         screens: { audience: typeof audience === 'boolean' ? audience : null, stage: typeof stage === 'boolean' ? stage : null },
         timers: Array.isArray(timers) ? timers.map((t) => ({ name: t?.id?.name, time: t?.time, state: t?.state })) : [],
+        media,
         capture: capture && typeof capture === 'object' ? { status: capture.status, destination: capture.capture_destination || null } : null,
         playlist,
         ...this.slowData,
@@ -130,6 +132,23 @@ export class ProPresenter {
       method, headers: { 'content-type': 'application/json' }, body: text ? JSON.stringify(text) : undefined,
     });
     if (!res.ok) throw new Error(`ProPresenter responded ${res.status}`);
+  }
+
+  /**
+   * What's playing on each media layer (videos, countdown videos, audio) with its position, so
+   * dashboards can show how long a video has left. /v1/transport/{layer}/current + /time.
+   */
+  async media() {
+    const out = {};
+    for (const layer of ['presentation', 'announcement', 'audio']) {
+      const cur = await this.opt(`/v1/transport/${layer}/current`);
+      if (!cur || typeof cur !== 'object' || !(cur.name || cur.uuid)) continue;
+      const t = await this.opt(`/v1/transport/${layer}/time`);
+      const time = typeof t === 'number' ? t : Number(t?.time ?? t?.current_time ?? t) || 0;
+      const duration = Number(cur.duration) || null;
+      out[layer] = { name: cur.name || 'Media', playing: Boolean(cur.is_playing ?? cur.playing), time, duration, at: Date.now() };
+    }
+    return out;
   }
 
   stop() { this.stopped = true; clearTimeout(this.timer); }

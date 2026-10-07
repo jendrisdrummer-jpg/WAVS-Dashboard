@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="auth-page">
+  <main class="auth-card">
+    <div class="auth-brand" id="brand"></div>
+    <h1 id="title">Sign in</h1>
+    <p class="muted" id="lead"></p>
+    <form class="form" id="form" autocomplete="on">
+      <label class="f hidden" id="f-name"><span>Your name</span><input type="text" name="name" maxlength="60" autocomplete="name" autocapitalize="words"></label>
+      <label class="f"><span>Email or username</span><input type="text" name="username" maxlength="80" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>
+      <label class="f"><span id="pw-label">Password</span><input type="password" name="password" minlength="1" autocomplete="current-password" required></label>
+      <label class="f hidden" id="f-pin"><span>Current admin PIN</span><input type="password" name="pin" inputmode="numeric" maxlength="20" autocomplete="off"></label>
+      <p class="cx-err" id="err" role="alert"></p>
+      <button class="btn primary big" id="submit">Sign in</button>
+    </form>
+    <p class="muted small" id="foot"></p>
+  </main>
+  <script type="module" src="/js/login.js"></script>
+</body>
+</html>

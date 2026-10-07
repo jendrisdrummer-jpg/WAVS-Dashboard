@@ -1,5 +1,5 @@
 // Home: what's happening now, where to go, and whether the gear is healthy.
-import { start, store, onRender, esc, setHTML, icon, fmtDuration } from './common.js';
+import { start, store, onRender, esc, setHTML, icon, fmtDuration, can } from './common.js';
 import { currentInfo, serviceClock, planSource } from './plan.js';
 
 await start({ page: 'home' });
@@ -9,11 +9,11 @@ const cfg = store.config;
 setHTML(document.getElementById('links'), [
   ['/greenroom', 'mic', 'Green Room', 'Who has which mic'],
   ['/rf', 'rf', 'RF & batteries', 'Every channel and frequency'],
-  ['/admin', 'list', 'Service & people', 'Plan, people, mic assignments'],
-  ['/comms/control', 'headset', 'Comms', 'Channels, people, cues'],
-  ['/gear', 'plug', 'Gear', 'Connections and setup'],
-  ['/settings', 'settings', 'Settings', 'Branding, PIN, Planning Center'],
-].map(([href, ic, title, sub]) => `<a class="htile" href="${href}">${icon(ic, 'ic htile-ic')}<b>${title}</b><small>${sub}</small></a>`).join(''));
+  ['/admin', 'list', 'Service & people', 'Plan, people, mic assignments', 'producer'],
+  ['/comms/control', 'headset', 'Comms', 'Channels, people, cues', 'producer'],
+  ['/gear', 'plug', 'Gear', 'Connections and setup', 'admin'],
+  ['/settings', 'settings', 'Settings', 'Accounts, branding, updates', 'admin'],
+].filter((l) => !l[4] || can(l[4])).map(([href, ic, title, sub]) => `<a class="htile" href="${href}">${icon(ic, 'ic htile-ic')}<b>${title}</b><small>${sub}</small></a>`).join(''));
 
 function gearSummary() {
   const rows = [

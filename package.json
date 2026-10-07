@@ -9,7 +9,12 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "demo": "WAVS_CONFIG=config/demo.yaml node server/index.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "service:install": "node scripts/service.mjs install",
+    "service:uninstall": "node scripts/service.mjs uninstall",
+    "service:stop": "node scripts/service.mjs stop",
+    "service:start": "node scripts/service.mjs start",
+    "service:status": "node scripts/service.mjs status"
   },
   "engines": {
     "node": ">=18"
@@ -19,6 +24,7 @@
     "gridstack": "^12.6.0",
     "hls.js": "^1.6.0",
     "multer": "^2.0.0",
+    "multicast-dns": "^7.2.5",
     "qrcode": "^1.5.4",
     "selfsigned": "^5.5.0",
     "ws": "^8.18.0",

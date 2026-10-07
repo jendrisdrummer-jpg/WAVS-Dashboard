@@ -27,14 +27,29 @@
       </form>
     </section>
 
+    <section class="panel" id="accounts">
+      <h2>Accounts &amp; sign-in</h2>
+      <div class="panel-body" id="acct-body"></div>
+    </section>
+
     <section class="panel" id="security">
       <h2>Admin PIN</h2>
       <form class="panel-body form" id="pin-form">
         <p class="muted small" id="pin-state"></p>
         <label class="f"><span>New PIN</span><input type="password" name="pin" inputmode="numeric" maxlength="20" autocomplete="new-password" placeholder="e.g. 4321"></label>
-        <small class="muted">Required to change settings, gear, people, dashboards and to switch organization. Viewing never needs a PIN.</small>
+        <small class="muted">Required to change settings, gear, people, dashboards and to switch organization. Viewing never needs a PIN. Once you create accounts above, accounts replace the PIN.</small>
         <div class="row-btns"><button class="btn primary">Set PIN</button><button class="btn danger" type="button" id="pin-remove">Remove PIN</button></div>
       </form>
+    </section>
+
+    <section class="panel" id="move">
+      <h2>Move to another computer</h2>
+      <div class="panel-body" id="move-body"></div>
+    </section>
+
+    <section class="panel" id="computer">
+      <h2>This computer</h2>
+      <div class="panel-body" id="computer-body"></div>
     </section>
 
     <section class="panel" id="pco">
@@ -68,6 +83,7 @@
       <div class="panel-body">
         <p class="muted small">Each organization has its own gear, people, dashboards, plans, branding and PIN. Only one is active at a time, because it drives the gear.</p>
         <div id="org-list" class="org-list"></div>
+        <p class="muted small">Saved on this computer in <span class="mono" id="data-dir"></span>. Updating or re-downloading the dashboard keeps it. To move to another computer, copy this folder.</p>
         <div class="row-btns"><button class="btn" id="org-add" type="button">Add organization</button></div>
       </div>
     </section>

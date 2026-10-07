@@ -78,10 +78,47 @@ function addWidget(def) {
 }
 
 /** Settings every widget has, whatever its type. */
+// Content size steps (A− / A+ in edit mode, the widget's ⚙, and the dashboard's "Size").
+const SIZES = [50, 60, 70, 80, 90, 100, 115, 130, 150, 175, 200];
+const step = (v, dir) => {
+  const i = SIZES.findIndex((s) => s >= v);
+  return SIZES[Math.min(SIZES.length - 1, Math.max(0, (i < 0 ? SIZES.length - 1 : i) + dir))];
+};
+/** A widget's own size, or the dashboard's. */
+const sizeOf = (def) => Number(def.options?.zoom) || current?.scale || 100;
+
+/** Big-number widgets (clock, timers, countdowns…) size their contents from the widget's box. */
+function fits(def) {
+  const f = WIDGETS[def.type]?.fit;
+  return typeof f === 'function' ? Boolean(f({ ...defaultsFor(def.type), ...def.options })) : Boolean(f);
+}
+
+/**
+ * Content size. Fitting widgets: contents fill the box as you resize it, and A−/A+ make that a bit
+ * smaller or bigger (--fit). Other widgets (lists, feeds, tables): everything inside is scaled, and
+ * a bigger box shows more rather than bigger.
+ */
+function applySize(entry) {
+  const z = sizeOf(entry.def) / 100;
+  const wb = entry.content?.querySelector('.wbody');
+  if (!wb) return;
+  const fit = fits(entry.def);
+  wb.classList.toggle('autofit', fit);
+  wb.classList.toggle('scaled', !fit && z !== 1);
+  wb.style.setProperty('--z', z);
+  wb.style.setProperty('--fit', fit ? z : 1);
+  const tag = entry.content.querySelector('.wsize');
+  if (tag) {
+    const manual = Boolean(Number(entry.def.options?.zoom));
+    tag.textContent = fit && !manual && z === 1 ? 'Auto' : `${Math.round(z * 100)}%`;
+    tag.title = manual ? 'Click to go back to automatic size' : fit ? 'Fits the widget: drag the corner to resize' : 'Same as the dashboard';
+  }
+}
+
 const COMMON_OPTIONS = [
   { key: 'title', label: 'Title', type: 'text', group: 'Widget' },
   { key: 'hideTitle', label: 'Hide the title bar', type: 'checkbox', group: 'Widget' },
-  { key: 'zoom', label: 'Content size', type: 'select', group: 'Widget', default: '100', choices: () => [['75', 'Small (75%)'], ['90', '90%'], ['100', 'Normal'], ['115', '115%'], ['130', 'Large (130%)'], ['150', 'Extra large (150%)']] },
+  { key: 'zoom', label: 'Content size', type: 'select', group: 'Widget', default: '', choices: () => [['', 'Automatic (fits the widget, or same as the dashboard)'], ...SIZES.map((v) => [String(v), `${v}%`])] },
 ];
 
 function mount(entry, content) {
@@ -90,10 +127,11 @@ function mount(entry, content) {
   content.innerHTML = `<div class="w ${widget?.chrome === false ? 'nochrome' : ''} ${opts.hideTitle ? 'notitle' : ''}">
     <div class="whead"><span class="wtitle">${esc(opts.title || widget?.title || entry.def.type)}</span>
       <span class="wactions"></span>
-      <span class="wedit"><button data-act="settings" title="Settings">⚙</button><button data-act="remove" title="Remove">✕</button></span></div>
-    <div class="wbody"></div></div>`;
+      <span class="wedit"><button data-act="smaller" title="Smaller contents">A−</button><button class="wsize" data-act="auto"></button><button data-act="bigger" title="Bigger contents">A+</button><button data-act="settings" title="Settings">⚙</button><button data-act="remove" title="Remove">✕</button></span></div>
+    <div class="wframe"><div class="wbody"></div></div></div>`;
   const body = content.querySelector('.wbody');
-  if (opts.zoom && opts.zoom !== '100') body.style.zoom = Number(opts.zoom) / 100;
+  entry.content = content;
+  applySize(entry);
   const actions = content.querySelector('.wactions');
   const ctx = {
     editing: () => editing,
@@ -131,6 +169,17 @@ gridEl.addEventListener('click', (e) => {
   if (!b) return;
   const id = b.closest('.grid-stack-item').getAttribute('gs-id');
   const entry = live.get(id);
+  if (b.dataset.act === 'auto') {
+    entry.def.options = { ...entry.def.options, zoom: '' };
+    applySize(entry);
+    return;
+  }
+  if (b.dataset.act === 'smaller' || b.dataset.act === 'bigger') {
+    const next = step(sizeOf(entry.def), b.dataset.act === 'bigger' ? 1 : -1);
+    entry.def.options = { ...entry.def.options, zoom: next === (current.scale || 100) ? '' : String(next) };
+    applySize(entry);
+    return;
+  }
   if (b.dataset.act === 'remove') {
     grid.removeWidget(entry.el);
     entry.inst?.destroy?.();
@@ -233,7 +282,7 @@ async function save() {
     return { ...def, x: n.x ?? 0, y: n.y ?? 0, w: n.w ?? def.w, h: n.h ?? def.h };
   });
   try {
-    current = await api('PUT', `/api/dashboards/${current.id}`, { widgets, rows: current.rows, name: current.name });
+    current = await api('PUT', `/api/dashboards/${current.id}`, { widgets, rows: current.rows, scale: current.scale || 100, name: current.name });
     builtFrom = JSON.stringify(current);
     setEditing(false);
     toast('Dashboard saved');
@@ -248,6 +297,8 @@ function renderHeader() {
     </select>`;
   slotRight.innerHTML = editing
     ? `<label class="small muted">Rows <input id="rows" type="number" min="4" max="40" value="${current.rows || 12}" style="width:56px"></label>
+       <label class="small muted" title="Size of the contents of every widget (each widget can override it with A− / A+)">Content
+         <select id="dscale">${SIZES.map((v) => `<option value="${v}" ${v === (current.scale || 100) ? 'selected' : ''}>${v}%</option>`).join('')}</select></label>
        <button class="btn small" id="rename">Rename</button>
        <button class="btn small" id="dup">Duplicate</button>
        <button class="btn small" id="new">New</button>
@@ -278,6 +329,8 @@ function renderHeader() {
   });
   const rows = slotRight.querySelector('#rows');
   if (rows) rows.onchange = () => { current.rows = Math.min(40, Math.max(4, Number(rows.value) || 12)); fitRows(); };
+  const dscale = slotRight.querySelector('#dscale');
+  if (dscale) dscale.onchange = () => { current.scale = Number(dscale.value); for (const en of live.values()) applySize(en); };
 }
 
 async function createDashboard(name, copyFrom) {

@@ -132,6 +132,7 @@ export class Comms extends EventEmitter {
     this.sockets.add(ws);
     // Off-site phones come in through the tunnel (from 127.0.0.1) but are never "this computer".
     ws.remote = Boolean(req.viaTunnel);
+    ws.authRank = ws.remote ? 0 : req.authRank || 0; // dashboard account role (0 = not signed in)
     ws.isLocal = !ws.remote && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
     ws.ip = (ws.remote && req.headers['cf-connecting-ip']) || req.socket.remoteAddress;
     ws.on('message', (raw, isBinary) => {
@@ -231,7 +232,7 @@ export class Comms extends EventEmitter {
     if (ws.remote && (role === 'engine' || role === 'control')) throw new Error('Only the comms phone page is available off-site');
     if (role === 'engine') {
       // The mixer must run on the dashboard computer itself (or know the admin PIN).
-      if (!ws.isLocal && !this.checkPin(pin)) throw new Error('The comms engine must run on the dashboard computer (or enter the admin PIN)');
+      if (!ws.isLocal && !this.checkPin(pin) && !(ws.authRank >= 3)) throw new Error('The comms engine must run on the dashboard computer (or enter the admin PIN)');
       if (this.engine && this.engine !== ws) this.send(this.engine, { t: 'replaced' });
       this.engine = ws;
       ws.role = 'engine';
@@ -241,7 +242,9 @@ export class Comms extends EventEmitter {
     }
     if (role === 'control') {
       const lead = token && this.data.members.find((m) => m.token === token && m.lead);
-      if (lead) {
+      if (ws.authRank >= 2) {
+        ws.role = 'control'; // signed in as a producer or admin
+      } else if (lead) {
         ws.role = 'control';
         ws.leadId = lead.id; // a lead: can run comms, but not change sign-in rules or choose leads
       } else if (this.checkPin(pin)) {

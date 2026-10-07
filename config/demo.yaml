@@ -48,3 +48,12 @@ mics:
         - { label: "Host HS", kind: headset }
         - { label: "Lav 1", kind: lav }
         - { label: "Lav 2", kind: lav }
+
+# Simulated live streams (viewer counts and comments). Real ones: Gear page → Live streams.
+streams:
+  - name: "YouTube (simulated)"
+    platform: simulator
+    simPlatform: youtube
+  - name: "Facebook (simulated)"
+    platform: simulator
+    simPlatform: facebook

@@ -42,6 +42,15 @@ export function defaultDashboards(cfg) {
       w('rf-table', 0, 7, 8, 5),
       w('checklist', 8, 7, 4, 5, { name: 'audio', title: 'Audio checklist' }),
     ]),
+    board('Online Host', [
+      w('viewers', 0, 0, 3, 4),
+      w('comments', 3, 0, 5, 10, { title: 'Comments' }),
+      w('comments', 8, 0, 4, 5, { title: 'Questions & prayer', filter: 'flagged' }),
+      w('comments', 8, 5, 4, 5, { title: 'Pinned comment', filter: 'pinned' }),
+      w('current-item', 0, 4, 3, 3),
+      w('notes', 0, 7, 3, 3, { name: 'online', title: 'Host notes' }),
+      w('timeline', 0, 10, 12, 2),
+    ]),
     board('Green Room TV', [
       w('mics', 0, 0, 9, 12, { layout: 'board', title: 'Who has which mic' }),
       w('clock', 9, 0, 3, 2),

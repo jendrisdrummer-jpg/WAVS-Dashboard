@@ -11,12 +11,13 @@ const SECTIONS = [
   { kind: 'receiver', title: 'Wireless mics', icon: 'mic', list: (s) => s.mics.receivers, set: (s, l) => ({ mics: { ...s.mics, receivers: l } }), empty: 'No receivers yet. Add your Shure SLX-D / ULX-D receivers to see batteries, RF and who has which mic.' },
   { kind: 'switcher', title: 'Switchers', icon: 'grid', list: (s) => s.switchers, set: (_s, l) => ({ switchers: l }), empty: 'No switcher yet. Add your ATEM (or vMix) for program/preview tally.' },
   { kind: 'propresenter', title: 'ProPresenter', icon: 'list', list: (s) => s.propresenter, set: (_s, l) => ({ propresenter: l }), empty: 'No ProPresenter yet. Add it to show slides and follow the service automatically.' },
+  { kind: 'stream', title: 'Live streams', icon: 'rf', list: (s) => s.streams || [], set: (_s, l) => ({ streams: l }), empty: 'No streams yet. Add YouTube or Facebook to see live viewer counts and comments.' },
   { kind: 'video', title: 'Video sources', icon: 'grid', list: (s) => s.video.sources, set: (s, l) => ({ video: { ...s.video, sources: l } }), empty: 'No video sources yet. Add a capture card or a MediaMTX stream for program and multiview tiles.' },
 ];
 
 /** Live status for one device: { state: 'ok' | 'bad' | 'off' | 'unknown', text, detail } */
 function status(kind, d) {
-  if (kind !== 'video' && d.type !== 'simulator' && !d.host) return { state: 'off', text: 'Placeholder', detail: 'No IP address yet. Click Edit to add it when you have it.' };
+  if (!['video', 'stream'].includes(kind) && d.type !== 'simulator' && !d.host) return { state: 'off', text: 'Placeholder', detail: 'No IP address yet. Click Edit to add it when you have it.' };
   if (kind === 'receiver') {
     const st = store.state.receivers[d.id];
     if (!st) return { state: 'unknown', text: 'Starting…' };
@@ -40,10 +41,18 @@ function status(kind, d) {
       ? { state: 'ok', text: 'Connected', detail: [st.version, st.presentation?.name && `Showing: ${st.presentation.name}`].filter(Boolean).join(' · ') }
       : { state: 'bad', text: 'Not connected', detail: st.error || 'Trying to reconnect…' };
   }
+  if (kind === 'stream') {
+    const st = store.state.streams?.[d.id];
+    if (!st) return { state: 'unknown', text: 'Starting…' };
+    if (st.error && !st.live) return { state: 'bad', text: 'Problem', detail: st.error };
+    return st.live
+      ? { state: 'ok', text: 'Live', detail: [st.title, `${(st.viewers ?? 0).toLocaleString()} watching`].filter(Boolean).join(' · ') }
+      : { state: 'ok', text: 'Connected', detail: 'Not live right now. Viewers and comments appear when you go live.' };
+  }
   return { state: 'unknown', text: d.type === 'capture' ? 'Checked by each browser' : 'Use Test to check', detail: d.type === 'capture' ? d.device : d.url };
 }
 
-const where = (kind, d) => (d.type === 'simulator' ? 'Simulated' : kind === 'video' ? '' : `${d.host || ''}${d.port && !['receiver'].includes(kind) ? `:${d.port}` : ''}`);
+const where = (kind, d) => (d.type === 'simulator' || d.platform === 'simulator' ? 'Simulated' : kind === 'stream' ? { youtube: 'YouTube', facebook: 'Facebook' }[d.platform] : kind === 'video' ? '' : `${d.host || ''}${d.port && !['receiver'].includes(kind) ? `:${d.port}` : ''}`);
 
 function render() {
   let total = 0;
@@ -84,7 +93,7 @@ function render() {
 
   setHTML(document.getElementById('sections'), html + pcoCard);
   document.getElementById('reconnect').classList.toggle('hidden', !total);
-  const placeholders = SECTIONS.reduce((n, sec) => n + (sec.kind === 'video' ? 0 : sec.list(settings).filter((d) => d.type !== 'simulator' && !d.host).length), 0);
+  const placeholders = SECTIONS.reduce((n, sec) => n + (['video', 'stream'].includes(sec.kind) ? 0 : sec.list(settings).filter((d) => d.type !== 'simulator' && !d.host).length), 0);
   document.getElementById('summary').innerHTML = total
     ? `<b class="${ok === total ? 'ok' : 'over'}">${ok} of ${total}</b> connected${ok === total ? ' · everything looks good' : ''}`
     + (placeholders ? ` · ${placeholders} waiting for an IP address` : '')

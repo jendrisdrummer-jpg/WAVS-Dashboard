@@ -23,6 +23,8 @@ const meChoices = (all = false) => () => [...(all ? [['all', 'All M/Es']] : [[''
 
 const meOf = (sw, me) => (me && me !== 'all' ? sw.mes?.[Number(me) - 1] : null) || sw.mes?.[0] || sw;
 const empty = (text) => `<div class="w-empty">${text}</div>`;
+const PLATFORM = { youtube: ['YT', 'YouTube'], facebook: ['f', 'Facebook'] };
+const platformBadge = (p) => `<span class="pf pf-${esc(p || 'other')}" title="${esc(PLATFORM[p]?.[1] || p || '')}">${esc(PLATFORM[p]?.[0] || '•')}</span>`;
 
 export const WIDGETS = {
   // ------------------------------------------------------------------ video
@@ -59,15 +61,131 @@ export const WIDGETS = {
 
   'pp-timers': {
     title: 'ProPresenter timers', icon: '⏱️', category: 'Slides', size: { w: 3, h: 3 },
-    options: [{ key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices }],
+    fit: true, // contents grow and shrink with the widget's box
+    options: [
+      { key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices },
+      { key: 'only', label: 'Only these timers (names, comma-separated; empty = all)', type: 'text', placeholder: 'e.g. Service, Sermon' },
+      { key: 'style', label: 'Look', type: 'select', choices: () => [['list', 'List'], ['big', 'Big (first timer fills the widget)']] },
+      { key: 'running', label: 'Only timers that are running', type: 'checkbox' },
+    ],
+    presets: [
+      { name: 'ProPresenter timers', icon: '⏱️', size: { w: 3, h: 3 }, options: {} },
+      { name: 'Big timer (one)', icon: '⏲️', size: { w: 3, h: 2 }, options: { style: 'big', running: true, title: 'Timer' } },
+    ],
     mount(body, opts) {
       return {
         update() {
           const pp = store.state.propresenter[opts.pp || ppChoices()[0]?.[0]];
-          const timers = pp?.timers || [];
-          setHTML(body, timers.length ? `<div class="timers">${timers.map((t) => `
-            <div class="timer ${t.state === 'running' ? 'running' : ''}"><span>${esc(t.name)}</span><b class="mono">${esc(t.time)}</b></div>`).join('')}</div>`
-            : empty(pp?.online ? 'No timers' : 'ProPresenter offline'));
+          const want = String(opts.only || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+          let timers = (pp?.timers || []).filter((t) => !want.length || want.includes(String(t.name).toLowerCase()));
+          if (opts.running) timers = timers.filter((t) => t.state === 'running');
+          if (!timers.length) return setHTML(body, empty(pp?.online ? (opts.running ? 'No timer running' : 'No timers') : 'ProPresenter offline'));
+          const tone = (t) => (String(t.time).trim().startsWith('-') ? 'over' : /^0?0:00:[0-2]\d$|^00:[0-2]\d$/.test(String(t.time).trim()) ? 'soon' : '');
+          if (opts.style === 'big') {
+            const t = timers[0];
+            return setHTML(body, `<div class="big-timer ${tone(t)} ${t.state === 'running' ? 'running' : ''}"><small>${esc(t.name)}</small><b class="mono">${esc(String(t.time).replace(/^00:/, ''))}</b><span class="muted small">${esc(t.state || '')}</span></div>`);
+          }
+          setHTML(body, `<div class="timers" style="--n:${timers.length}">${timers.map((t) => `
+            <div class="timer ${t.state === 'running' ? 'running' : ''} ${tone(t)}"><span>${esc(t.name)}</span><b class="mono">${esc(String(t.time).replace(/^00:/, ''))}</b></div>`).join('')}</div>`);
+        },
+      };
+    },
+  },
+
+  'pp-media': {
+    title: 'Video countdown', icon: '🎬', category: 'Slides', size: { w: 3, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
+    options: [
+      { key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices },
+      { key: 'layer', label: 'Layer', type: 'select', choices: () => [['any', 'Whatever is playing'], ['presentation', 'Presentation (videos on slides)'], ['announcement', 'Announcements'], ['audio', 'Audio']] },
+      { key: 'show', label: 'Show', type: 'select', choices: () => [['remaining', 'Time remaining'], ['elapsed', 'Time elapsed']] },
+      { key: 'warn', label: 'Turn amber in the last … seconds', type: 'number', default: 10 },
+    ],
+    mount(body, opts) {
+      return {
+        update() {
+          const pp = store.state.propresenter[opts.pp || ppChoices()[0]?.[0]];
+          const media = pp?.media || {};
+          const order = opts.layer && opts.layer !== 'any' ? [opts.layer] : ['presentation', 'announcement', 'audio'];
+          const m = order.map((l) => media[l]).find((x) => x && x.duration);
+          if (!m) return setHTML(body, empty(pp?.online ? 'No video playing' : 'ProPresenter offline'));
+          // Keep counting smoothly between updates while it plays.
+          const pos = Math.min(m.duration, m.time + (m.playing ? (Date.now() - m.at) / 1000 : 0));
+          const left = Math.max(0, m.duration - pos);
+          const warn = Number(opts.warn ?? 10);
+          setHTML(body, `<div class="pp-media ${left <= warn ? 'soon' : ''} ${m.playing ? '' : 'paused'}">
+            <div class="pm-name">${m.playing ? '▶' : '⏸'} ${esc(m.name)}</div>
+            <b class="mono pm-time">${opts.show === 'elapsed' ? fmtDuration(pos) : `-${fmtDuration(left)}`}</b>
+            <div class="bar pm-bar"><i style="width:${Math.min(100, (pos / m.duration) * 100)}%"></i></div>
+            <small class="muted">${fmtDuration(pos)} / ${fmtDuration(m.duration)}</small></div>`);
+        },
+      };
+    },
+  },
+
+  'pp-slide': {
+    title: 'Current slide', icon: '🔤', category: 'Slides', size: { w: 4, h: 3 },
+    fit: true, // contents grow and shrink with the widget's box
+    options: [
+      { key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices },
+      { key: 'which', label: 'Show', type: 'select', choices: () => [['current', 'Current slide'], ['next', 'Next slide'], ['both', 'Current and next']] },
+      { key: 'notes', label: 'Show slide notes', type: 'checkbox' },
+      { key: 'size', label: 'Text size in px (empty = fit the widget)', type: 'number', default: '' },
+    ],
+    presets: [
+      { name: 'Current slide (text)', icon: '🔤', size: { w: 4, h: 3 }, options: {} },
+      { name: 'Next slide (text)', icon: '⏭️', size: { w: 3, h: 2 }, options: { which: 'next', title: 'Next slide' } },
+    ],
+    mount(body, opts) {
+      return {
+        update() {
+          const pp = store.state.propresenter[opts.pp || ppChoices()[0]?.[0]];
+          if (!pp?.online) return setHTML(body, empty('ProPresenter offline'));
+          const part = (s, label, cls) => `<div class="ps ${cls}">${label ? `<small class="muted">${label}</small>` : ''}<div class="ps-text" style="${Number(opts.size) ? `font-size:${cls === 'next' && opts.which === 'both' ? opts.size * 0.6 : opts.size}px` : ''}">${esc(s?.text || '') || '<span class="muted">(blank)</span>'}</div>
+            ${opts.notes && s?.notes ? `<div class="ps-notes">${esc(s.notes)}</div>` : ''}</div>`;
+          body.querySelector('.pp-slide-w')?.classList.toggle('both', opts.which === 'both');
+          const html = opts.which === 'next' ? part(pp.next, '', 'next')
+            : opts.which === 'both' ? part(pp.current, 'Now', 'cur') + part(pp.next, 'Next', 'next')
+            : part(pp.current, '', 'cur');
+          setHTML(body, `<div class="pp-slide-w ${opts.which === 'both' ? 'both' : ''}"><div class="muted small">${esc(pp.presentation?.name || '')}</div>${html}</div>`);
+        },
+      };
+    },
+  },
+
+  'pp-playlist': {
+    title: 'ProPresenter playlist', icon: '🗂️', category: 'Slides', size: { w: 3, h: 5 },
+    options: [{ key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices }],
+    mount(body, opts) {
+      let last = -2;
+      return {
+        update() {
+          const pp = store.state.propresenter[opts.pp || ppChoices()[0]?.[0]];
+          const pl = pp?.playlist;
+          if (!pl) return setHTML(body, empty(pp?.online ? 'No playlist active' : 'ProPresenter offline'));
+          setHTML(body, `<div class="ppl"><b>${esc(pl.name)}</b>${pl.items.map((it, i) => it.type === 'header'
+            ? `<div class="pl-h">${esc(it.name)}</div>`
+            : `<div class="ppl-i ${i === pl.index ? 'cur' : ''} ${pl.index > -1 && i < pl.index ? 'done' : ''}">${esc(it.name)}</div>`).join('')}</div>`);
+          if (pl.index !== last) { last = pl.index; body.querySelector('.ppl-i.cur')?.scrollIntoView({ block: 'nearest' }); }
+        },
+      };
+    },
+  },
+
+  'pp-status': {
+    title: 'ProPresenter status', icon: '🟢', category: 'Slides', size: { w: 3, h: 2 },
+    options: [{ key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices }],
+    mount(body, opts) {
+      const LAYERS = [['slide', 'Slide'], ['media', 'Media'], ['video_input', 'Video in'], ['announcements', 'Announce'], ['props', 'Props'], ['messages', 'Messages'], ['audio', 'Audio']];
+      return {
+        update() {
+          const pp = store.state.propresenter[opts.pp || ppChoices()[0]?.[0]];
+          if (!pp?.online) return setHTML(body, empty(pp?.error ? `ProPresenter offline<br><small>${esc(pp.error)}</small>` : 'ProPresenter offline'));
+          const chip = (on, label) => `<span class="chip ${on ? 'on' : ''}">${label}</span>`;
+          setHTML(body, `<div class="pps">
+            <div class="chips">${chip(pp.screens?.audience, 'Audience screen')}${chip(pp.screens?.stage, 'Stage screen')}${pp.capture ? chip(pp.capture.status === 'active', `Recording${pp.capture.destination ? ` · ${esc(pp.capture.destination)}` : ''}`) : ''}</div>
+            <div class="chips">${LAYERS.filter(([k]) => pp.layers && k in pp.layers).map(([k, l]) => chip(pp.layers[k], l)).join('')}</div>
+            ${pp.look ? `<small class="muted">Look: ${esc(pp.look)}</small>` : ''}</div>`);
         },
       };
     },
@@ -233,8 +351,76 @@ export const WIDGETS = {
     },
   },
 
+  timeline: {
+    title: 'Service timeline', icon: '🎞️', category: 'Service', size: { w: 12, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
+    presets: [
+      { name: 'Service timeline (strip)', icon: '🎞️', size: { w: 12, h: 2 }, options: {} },
+      { name: 'Service timeline (by length)', icon: '📏', size: { w: 12, h: 2 }, options: { sizing: 'length' } },
+    ],
+    options: [
+      { key: 'sizing', label: 'Block width', type: 'select', choices: () => [['equal', 'Equal squares'], ['length', 'By planned length']] },
+      { key: 'past', label: 'Finished items', type: 'select', choices: () => [['2', 'Show the last 2'], ['all', 'Show all'], ['0', 'Hide']] },
+      { key: 'times', label: 'Show planned start times', type: 'checkbox', default: true },
+      { key: 'headers', label: 'Show section headers (e.g. Worship, Message)', type: 'checkbox', default: true },
+      { key: 'click', label: 'Click an item to make it current', type: 'checkbox', default: true },
+    ],
+    mount(body, opts, ctx) {
+      body.classList.add('flush');
+      body.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-item]');
+        if (!b || ctx.editing() || !opts.click) return;
+        api('POST', '/api/service/current', { itemId: b.dataset.item }).catch((err) => toast(err.message, true));
+      });
+      let lastCur = null;
+      return {
+        update() {
+          const svc = store.service;
+          if (!svc.plan) return setHTML(body, empty('No service plan yet'));
+          const timing = planTiming(svc);
+          const all = svc.plan.items;
+          const playable = all.filter((i) => i.type !== 'header');
+          const curIdx = playable.findIndex((i) => i.id === svc.current?.itemId);
+          const keepPast = opts.past === 'all' ? Infinity : Number(opts.past || 0);
+          const firstShown = curIdx < 0 ? 0 : Math.max(0, curIdx - keepPast);
+          const shownIds = new Set(playable.slice(firstShown).map((i) => i.id));
+          const longest = Math.max(60, ...playable.map((i) => i.length || 0));
+          let header = null;
+          const blocks = [];
+          for (const it of all) {
+            if (it.type === 'header') { header = it.title; continue; }
+            if (!shownIds.has(it.id)) { header = null; continue; }
+            if (header && opts.headers !== false) blocks.push(`<div class="tl-h"><span>${esc(header)}</span></div>`);
+            header = null;
+            const t = timing.items[it.id] || {};
+            const isCur = it.id === svc.current?.itemId;
+            const actual = svc.actuals?.[it.id];
+            const over = isCur ? it.length && t.remaining < 0 : actual != null && it.length && actual > it.length + 15;
+            const pct = isCur && it.length ? Math.min(100, Math.max(0, 100 - (t.remaining / it.length) * 100)) : 0;
+            const grow = opts.sizing === 'length' ? `flex-grow:${Math.max(0.6, (it.length || 60) / longest * 3).toFixed(2)};` : '';
+            blocks.push(`<button class="tl-i ${isCur ? 'cur' : ''} ${t.done ? 'done' : ''} ${over ? 'over' : ''}" style="${grow}" data-item="${esc(it.id)}">
+              <span class="tl-top">${opts.times !== false && t.start ? `<span class="mono">${t.start}</span>` : ''}${it.key ? `<span class="chip">${esc(it.key)}</span>` : ''}</span>
+              <span class="tl-n">${esc(it.title)}</span>
+              <span class="tl-l mono">${isCur ? (it.length ? fmtDuration(t.remaining) : fmtDuration(-t.remaining || 0)) : t.done && actual != null ? fmtDuration(actual) : it.length ? fmtDuration(it.length) : '—'}</span>
+              ${isCur ? `<span class="tl-bar"><i style="width:${pct}%"></i></span>` : ''}
+            </button>`);
+          }
+          setHTML(body, `<div class="tl ${opts.sizing === 'length' ? 'by-length' : ''}">${blocks.join('') || empty('The service is finished')}</div>`);
+          const cur = svc.current?.itemId;
+          if (cur !== lastCur) {
+            lastCur = cur;
+            const el = body.querySelector('.tl-i.cur');
+            const strip = body.querySelector('.tl');
+            if (el && strip) strip.scrollTo({ left: Math.max(0, el.offsetLeft - strip.clientWidth * 0.15), behavior: 'smooth' });
+          }
+        },
+      };
+    },
+  },
+
   'current-item': {
     title: 'Current item', icon: '⏳', category: 'Service', size: { w: 3, h: 3 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [{ key: 'controls', label: 'Show Previous / Next buttons', type: 'checkbox' }],
     mount(body, opts, ctx) {
       body.addEventListener('click', (e) => {
@@ -261,6 +447,7 @@ export const WIDGETS = {
 
   'service-clock': {
     title: 'Service clock', icon: '🕘', category: 'Service', size: { w: 3, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [],
     mount(body) {
       return {
@@ -274,6 +461,7 @@ export const WIDGETS = {
 
   clock: {
     title: 'Clock', icon: '🕑', category: 'Service', size: { w: 3, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [{ key: 'seconds', label: 'Show seconds', type: 'checkbox', default: true }],
     mount(body, opts) {
       return {
@@ -335,6 +523,98 @@ export const WIDGETS = {
           lastDraw = Date.now();
           const list = store.slots.map(micView);
           drawSpectrum(svg, list, spacingConflicts(list));
+        },
+      };
+    },
+  },
+
+  // ------------------------------------------------------------------ live stream
+  viewers: {
+    title: 'Live viewers', icon: '📈', category: 'Stream', size: { w: 3, h: 3 },
+    fit: true, // contents grow and shrink with the widget's box
+    options: [
+      { key: 'perPlatform', label: 'Show each platform', type: 'checkbox', default: true },
+      { key: 'graph', label: 'Show the last hour as a graph', type: 'checkbox', default: true },
+    ],
+    mount(body, opts) {
+      return {
+        update() {
+          const list = Object.entries(store.state.streams || {}).map(([id, s]) => ({ id, ...s }));
+          if (!list.length) return setHTML(body, empty('No streams set up.<br><small>Add YouTube or Facebook on the <a href="/gear">Gear</a> page.</small>'));
+          const live = list.filter((s) => s.live);
+          const total = live.reduce((n, s) => n + (s.viewers || 0), 0);
+          const hist = (store.streams.history || []).filter((p) => p.t > Date.now() - 3600000);
+          let graph = '';
+          if (opts.graph !== false && hist.length > 1) {
+            const max = Math.max(1, ...hist.map((p) => p.v));
+            const pts = hist.map((p, i) => `${((i / (hist.length - 1)) * 100).toFixed(1)},${(30 - (p.v / max) * 28).toFixed(1)}`).join(' ');
+            graph = `<svg class="vw-graph" viewBox="0 0 100 30" preserveAspectRatio="none" aria-label="Viewers over the last hour"><polyline points="${pts}" /></svg>`;
+          }
+          setHTML(body, `<div class="vw">
+            <div class="vw-total"><b class="mono">${live.length ? total.toLocaleString() : '—'}</b><small>${live.length ? 'watching now' : 'not live'}${store.streams.peak ? ` · peak ${store.streams.peak.toLocaleString()}` : ''}</small></div>
+            ${graph}
+            ${opts.perPlatform !== false ? `<div class="vw-list">${list.map((s) => `<div class="vw-row ${s.live ? 'on' : ''}" title="${esc(s.error || s.title || '')}">
+              ${platformBadge(s.platform)}<span class="vw-name">${esc(s.name)}</span>
+              <span class="vw-state">${s.error && !s.live ? '<span class="over">⚠</span>' : s.live ? '<span class="live-dot"></span>' : '<small class="muted">offline</small>'}</span>
+              <b class="mono">${s.live ? (s.viewers ?? 0).toLocaleString() : ''}</b></div>`).join('')}</div>` : ''}
+          </div>`);
+        },
+      };
+    },
+  },
+
+  comments: {
+    title: 'Stream comments', icon: '💬', category: 'Stream', size: { w: 4, h: 6 },
+    fit: (o) => o.filter === 'pinned', // the big pinned comment fills its box; the feed shows more comments instead
+    options: [
+      { key: 'filter', label: 'Show', type: 'select', choices: () => [['all', 'All comments'], ['flagged', 'Questions and prayer requests'], ['question', 'Questions only'], ['prayer', 'Prayer requests only'], ['pinned', 'Only the pinned comment (big, for a host or confidence screen)']] },
+      { key: 'platforms', label: 'Platforms', type: 'select', choices: () => [['all', 'All'], ['youtube', 'YouTube'], ['facebook', 'Facebook']] },
+      { key: 'highlight', label: 'Highlight questions and prayer requests', type: 'checkbox', default: true },
+      { key: 'newestTop', label: 'Newest at the top', type: 'checkbox' },
+    ],
+    presets: [
+      { name: 'Stream comments', icon: '💬', size: { w: 4, h: 6 }, options: {} },
+      { name: 'Questions & prayer requests', icon: '🙏', size: { w: 4, h: 5 }, options: { title: 'Questions & prayer', filter: 'flagged' } },
+      { name: 'Pinned comment (big)', icon: '📌', size: { w: 6, h: 3 }, options: { filter: 'pinned', title: 'Pinned comment' } },
+    ],
+    mount(body, opts, ctx) {
+      body.addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-pin],[data-hide],[data-unpin]');
+        if (!b || ctx.editing()) return;
+        try {
+          if (b.dataset.pin) await api('POST', '/api/streams/pin', { id: b.dataset.pin });
+          if (b.dataset.unpin != null) await api('POST', '/api/streams/pin', { id: null });
+          if (b.dataset.hide && confirm('Hide this comment from the dashboards? (It stays on YouTube/Facebook.)')) await api('POST', '/api/streams/hide', { id: b.dataset.hide });
+        } catch (err) { toast(err.message, true); }
+      });
+      let stick = true;
+      body.addEventListener('scroll', () => {
+        const atEdge = opts.newestTop ? body.scrollTop < 20 : body.scrollHeight - body.scrollTop - body.clientHeight < 30;
+        stick = atEdge;
+      });
+      return {
+        update() {
+          const p = store.streams.pinned;
+          if (opts.filter === 'pinned') {
+            return setHTML(body, p ? `<div class="cm-pinned-big">${platformBadge(p.platform)}<div class="cm-pb-text">${esc(p.text)}</div><div class="cm-pb-author">— ${esc(p.author)}</div></div>`
+              : empty('No comment pinned.<br><small>Pin one from a comments widget.</small>'));
+          }
+          let list = store.streams.comments;
+          if (opts.platforms && opts.platforms !== 'all') list = list.filter((c) => c.platform === opts.platforms);
+          if (opts.filter === 'question' || opts.filter === 'prayer') list = list.filter((c) => c.kind === opts.filter);
+          if (opts.filter === 'flagged') list = list.filter((c) => c.kind);
+          list = list.slice(-120);
+          if (opts.newestTop) list = [...list].reverse();
+          const anySource = Object.keys(store.state.streams || {}).length;
+          const html = `${p ? `<div class="cm-pin">${platformBadge(p.platform)}<b>${esc(p.author)}</b> ${esc(p.text)}<button class="btn small" data-unpin title="Unpin">✕</button></div>` : ''}
+            <div class="cm-list">${list.map((c) => `<div class="cm ${opts.highlight !== false && c.kind ? `k-${c.kind}` : ''} ${p?.id === c.id ? 'pinned' : ''}">
+              ${platformBadge(c.platform)}
+              <div class="cm-body"><div class="cm-head"><b>${esc(c.author)}</b><small class="muted">${new Date(c.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small>
+                ${opts.highlight !== false && c.kind ? `<span class="chip">${c.kind === 'question' ? 'Question' : 'Prayer'}</span>` : ''}</div>
+                <div class="cm-text">${esc(c.text)}</div></div>
+              <span class="cm-acts"><button class="btn small" data-pin="${esc(c.id)}" title="Pin (shows on 'pinned' widgets)">📌</button><button class="btn small" data-hide="${esc(c.id)}" title="Hide">✕</button></span>
+            </div>`).join('') || empty(anySource ? 'No comments yet' : 'No streams set up.<br><small>Add YouTube or Facebook on the <a href="/gear">Gear</a> page.</small>')}</div>`;
+          if (setHTML(body, html) && stick) body.scrollTop = opts.newestTop ? 0 : body.scrollHeight;
         },
       };
     },
@@ -455,13 +735,14 @@ export const WIDGETS = {
 
   text: {
     title: 'Text', icon: '🔤', category: 'Team', size: { w: 3, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [
       { key: 'text', label: 'Text', type: 'textarea' },
-      { key: 'size', label: 'Text size (px)', type: 'number', default: 28 },
+      { key: 'size', label: 'Text size in px (empty = fit the widget)', type: 'number', default: '' },
       { key: 'align', label: 'Align', type: 'select', choices: () => [['center', 'Center'], ['left', 'Left']] },
     ],
     mount(body, opts) {
-      body.innerHTML = `<div class="w-text" style="font-size:${Number(opts.size) || 28}px;text-align:${opts.align === 'left' ? 'left' : 'center'}">${esc(opts.text || '')}</div>`;
+      body.innerHTML = `<div class="w-text" style="${Number(opts.size) ? `font-size:${Number(opts.size)}px;` : ''}text-align:${opts.align === 'left' ? 'left' : 'center'}">${esc(opts.text || '')}</div>`;
       return { update() {} };
     },
   },
@@ -476,7 +757,7 @@ export const WIDGETS = {
   },
 };
 
-export const CATEGORIES = ['Service', 'Video', 'Switcher', 'Slides', 'Audio & RF', 'Team'];
+export const CATEGORIES = ['Service', 'Video', 'Switcher', 'Slides', 'Audio & RF', 'Stream', 'Team'];
 
 /** Very small, safe formatter for notes: # heading, - bullets, ! highlight, links. */
 function formatNote(text) {

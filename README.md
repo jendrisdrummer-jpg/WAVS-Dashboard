@@ -19,6 +19,15 @@ wireless mics with photos, RF, notes and checklists.
 
 ## Quick start
 
+**Mac (recommended):** get the code once with git (`git clone https://github.com/jendrisdrummer-jpg/WAVS-Dashboard.git ~/WAVS-Dashboard`), install [Node.js LTS](https://nodejs.org), then open the `WAVS-Dashboard` folder in Finder and double-click **Install WAVS Dashboard (Mac).command**. From then on:
+- It starts by itself whenever the Mac logs in, and restarts if it ever stops. You don't need Terminal.
+- Open it at **http://wavs.local** from any device on your network, or http://localhost:8080 on the Mac itself.
+- To update, go to **Settings → This computer → Check for updates**, then **Update now**.
+
+Windows: double-click **Install WAVS Dashboard (Windows).cmd**. Linux: `npm install && npm run service:install`.
+
+To try it from Terminal instead:
+
 ```bash
 npm install
 npm run demo          # every device simulated, no hardware needed
@@ -42,7 +51,8 @@ You don't need to edit a config file.
 | `/rf` | Every receiver channel, plus a frequency plot that flags carriers spaced too closely. |
 | `/admin` | **Service & People**: the order of service (Planning Center, the ProPresenter playlist, or typed in), people and photos, mic assignments. |
 | `/gear` | **Gear**: shows whether each receiver, switcher, ProPresenter and Planning Center is connected. Add, edit, **Test** and remove devices here. |
-| `/settings` | **Settings**: name, colour, logo, admin PIN, Planning Center, alert thresholds, organizations. |
+| `/settings` | **Settings**: accounts and invites, name, colour, logo, Planning Center, alert thresholds, organizations, updates. |
+| `/login`, `/join/<code>` | Sign in, or create an account from an invite link. |
 | `/comms/control` | **Comms**: the team list, who can talk and listen on each channel, cues, and the QR code phones scan to join. |
 | `/comms/engine` | The **comms engine**, which mixes the comms audio. Open it on the dashboard computer and leave it open. |
 | `https://<ip>:8443/comms` | **Comms on a phone**: sign in, then listen and talk. |
@@ -97,12 +107,17 @@ Lobby TV or Campus 2. On phones, widgets stack into a single column.
 
 | Category | Widgets |
 |---|---|
-| Service | **Service plan** (planned start times, current item countdown, actual vs planned), **Current item** (big countdown and up next), **Service clock** (countdown to start, time remaining, overrun), **Clock** |
+| Service | **Service plan** (planned start times, current item countdown, actual vs planned), **Service timeline** (a strip of blocks across the top or bottom, one per item with its length, current highlighted with its countdown, then what's next; equal squares or sized by length), **Current item** (big countdown and up next), **Service clock** (countdown to start, time remaining, overrun), **Clock** |
 | Video | **Video feed** (capture card, WebRTC/WHEP, HLS, MJPEG, web page) with PGM/PVW tally overlay |
 | Switcher | **Program / Preview** for any M/E, **Switcher overview** (every M/E with keyers, DSKs, aux outputs, stream/record), **Camera tally** (red on air, green preview, per M/E or all) |
-| Slides | **ProPresenter** (live and next slide, groups, layers, screens, look, recording), **ProPresenter timers**, **Stage message** |
+| Slides | **ProPresenter** (everything in one tile), or pick pieces: **ProPresenter timers** (all, chosen by name, or one **big timer**; red when over), **Video countdown** (time left on the playing video, e.g. a countdown or walk-in video), **Current slide** / **Next slide** (text, optional notes), **ProPresenter playlist**, **ProPresenter status** (screens, layers, recording, look), **Stage message** |
 | Audio & RF | **Mics & gear** in five looks (see below), **RF & batteries** table, **Frequency plot** |
+| Stream | **Live viewers** (total and per platform, peak, last-hour graph), **Stream comments** (YouTube + Facebook in one feed; questions and prayer requests highlighted; filter to just those), **Pinned comment** (big, for a host or confidence screen) |
 | Team | **Alerts**, **Notes** (shared live), **Checklist** (shared live, with sections and progress), **Text**, **Web page** (stream analytics, Resi, encoder status, Companion…) |
+
+**Sizing what's inside a widget.** Widgets that show one big thing fit their box: drag the corner and the contents grow or shrink with it. These are the clock, service clock, current item, timers, video countdown, current/next slide, live viewers, pinned comment, text and the service timeline. When small, they switch to a compact look (for example, a tiny timer shows only the time). Lists, feeds and tables (service plan, comments, playlist, RF, mic boards, notes) keep readable text and show more as they get bigger.
+
+In **✎ Edit**, every widget has **A− / A+** to make its contents smaller or bigger (50–200%). Click the size label between them (**Auto** or a %) to go back to automatic. **Content** at the top sets the size for the whole dashboard. Text and Current slide widgets also take a fixed size in px if you prefer.
 
 ### Mic board
 The **Green Room TV** dashboard and `/greenroom` show one column per mic:
@@ -236,6 +251,32 @@ A web page can't read SDI or NDI directly. Each source in `video.sources` uses o
 | `mjpeg` | A camera or encoder serves MJPEG or JPEG snapshots | Add `refreshMs` for snapshot URLs |
 | `iframe` | Any web page | |
 
+## Live streams: viewers and comments
+
+Add streams on the **Gear** page: **+ Add gear → Live stream**. Each one has a **Test** button. The **Online Host** starter dashboard shows them all.
+
+**YouTube Live** (free):
+1. Go to [Google Cloud Console](https://console.cloud.google.com/), create a project, open **APIs & Services → Library**, and enable **YouTube Data API v3**.
+2. Under **Credentials**, choose **Create credentials → API key**. It's best to restrict the key to the YouTube Data API.
+3. In the dashboard, enter your channel (`@yourchurch` or the channel link) and the key.
+
+The dashboard finds the live video by itself each time you go live; paste a video link instead to follow one specific stream. Viewer counts update about every 20 seconds and chat every 6–10 seconds. A two-hour service uses well under the free daily quota.
+
+**Facebook Live** (needs a Page access token):
+1. At [developers.facebook.com](https://developers.facebook.com/), create an app (type *Business*), with yourself as an admin of the Page.
+2. In [Graph API Explorer](https://developers.facebook.com/tools/explorer/), pick the app. Add the permissions **pages_show_list**, **pages_read_engagement** and **pages_read_user_content**, click **Generate Access Token**, and approve.
+3. Under *User or Page*, choose your Page to get a **Page access token**.
+4. Make it long-lived: paste it into the [Access Token Debugger](https://developers.facebook.com/tools/debug/accesstoken/) and click **Extend Access Token**. A Page token made from a long-lived user token doesn't expire.
+5. Enter the **Page ID** (Page → About) and the token in the dashboard.
+
+Facebook only shows commenters' names to apps with those permissions; otherwise comments appear as "Facebook viewer".
+
+**Comments.** Comments from every platform appear in one feed, each with a YouTube or Facebook badge. Questions (ending in `?`, or starting with who/what/when…) and prayer requests ("pray…") are highlighted and can be filtered. Producers can **📌 pin** a comment so it shows big on any *Pinned comment* widget, or **✕ hide** one from the dashboards (it stays on YouTube or Facebook). Replying from the dashboard isn't supported.
+
+**Subsplash** doesn't offer a public API for live viewer counts or chat, so it can't be connected yet. If you simulcast to YouTube or Facebook, those counts and comments show up. If Subsplash gives you API access, it can be added.
+
+API keys and tokens are stored with the organization's settings and are never sent to browsers.
+
 ## Comms (intercom on phones)
 
 Your crew talk and listen through their phone's browser. Nothing needs installing.
@@ -261,12 +302,12 @@ With both off, anyone on the network can join and pick a position.
 ### Setting it up
 1. On the dashboard computer, open **`http://localhost:8080/comms/engine`** in Chrome and click **Start**. Leave the tab open; closing it stops comms. Allow the microphone when asked: that lets phones connect directly, and nothing is recorded.
 2. Phones join by scanning the QR code on the Comms page. There are two kinds of link:
-   - **Same Wi-Fi** (`https://<computer-ip>:8443/comms`): the phone must be on the same network as the dashboard computer. Phones only allow the microphone on `https://` pages, so the dashboard runs a second, encrypted port (**8443**) with its own certificate (stored in `data/tls/`). The first time, each phone warns that the connection isn't private:
+   - **Same Wi-Fi** (`https://<computer-ip>:8443/comms`): the phone must be on the same network as the dashboard computer. Phones only allow the microphone on `https://` pages, so the dashboard runs a second, encrypted port (**8443**) with its own certificate (stored in the data folder under `tls/`). The first time, each phone warns that the connection isn't private:
      - iPhone: tap **Show Details → visit this website**.
      - Android: tap **Advanced → Proceed**.
 
      Change the port with `HTTPS_PORT=...` (`HTTPS_PORT=0` turns it off).
-   - **Anywhere** (turn on **Off-site access** on the Comms page): a secure link like `https://<random>.trycloudflare.com/comms` that works on any network (Wi-Fi, a personal hotspot, cellular) with no certificate warning. It uses a free Cloudflare quick tunnel and needs no account. The first time, the dashboard downloads Cloudflare's `cloudflared` program into `data/bin/`; if you already installed it with Homebrew, that copy is used. The link changes each time the dashboard restarts, and the QR code updates with it. Only the comms phone page is reachable through this link: the dashboard, settings and the comms control page are not. Set a **team password** or **Only people on the list** when using it.
+   - **Anywhere** (turn on **Off-site access** on the Comms page): a secure link like `https://<random>.trycloudflare.com/comms` that works on any network (Wi-Fi, a personal hotspot, cellular) with no certificate warning. It uses a free Cloudflare quick tunnel and needs no account. The first time, the dashboard downloads Cloudflare's `cloudflared` program into the data folder (`bin/`); if you already installed it with Homebrew, that copy is used. The link changes each time the dashboard restarts, and the QR code updates with it. Only the comms phone page is reachable through this link: the dashboard, settings and the comms control page are not. Set a **team password** or **Only people on the list** when using it.
 3. Use headphones. Each phone keeps its screen awake while comms is open.
 
 **How the audio travels.** A phone first tries to connect its audio directly to the comms engine, which is quickest. If that doesn't work within a few seconds (a hotspot, cellular, or guest Wi-Fi that keeps devices apart), it automatically sends its audio through the dashboard instead. The phone then shows **Connected · via internet**, and the Comms page shows *audio via internet*. That uses about 128 kbit/s each way, and only while someone is talking.
@@ -315,25 +356,81 @@ You can change the thresholds under `alerts:` in the config.
  Shure RX ──TCP 2202──┼─► Node server ──WS────┼── /greenroom
  Planning Center ─────┤   (hub, alerts,       ├── /rf
  (simulators) ────────┘    service tracker)   └── /admin  (setup)
-                          data/*.json  (people, plan progress, notes, dashboards)
+                          data folder (orgs, people, plans, dashboards, comms)
  Capture card / MediaMTX ──────────────────► browser <video>
 ```
 
 - `server/`: Express and WebSocket. All live state sits in one hub. Meters are batched and sent
   10 times per second.
 - `public/`: plain HTML, CSS and JS modules with no build step.
-- `data/`: everything you create, as plain JSON. `data/orgs.json` lists the organizations, and each
-  one has a folder `data/orgs/<id>/` with its settings (gear, PIN, Planning Center), people and
-  photos, dashboards, notes and plan progress. Back this folder up.
+- **Your data** (everything you create, as plain JSON) is kept outside the code folder, so updating,
+  re-downloading or re-cloning the dashboard never loses it:
+  - macOS: `~/Library/Application Support/WAVS Dashboard`
+  - Windows: `%APPDATA%\WAVS Dashboard`
+  - Linux: `~/.wavs-dashboard`
+
+  `orgs.json` lists the organizations, and each one has a folder `orgs/<id>/` with its settings
+  (gear, PIN, Planning Center), people and photos, dashboards, notes, plan progress and comms.
+  Settings → Organizations shows the exact location. Back this folder up, or copy it to move to
+  another computer. Set `WAVS_DATA=<folder>` to use a different folder.
+
+  Older versions kept this in the code folder's `data/`. On first start, the dashboard copies the
+  most recently used setup from there, or from another copy named `WAVS-Dashboard…` in your
+  home folder, Downloads, Desktop or Documents. The old folder is left untouched.
 - `config/config.yaml` is optional and only holds the server port. When this version first
   starts, the gear and branding from an existing `config.yaml` are imported into the first
   organization, along with existing people and dashboards.
 - `npm test`: tests for the Shure (SLX-D/ULX-D/AD) and vMix parsers, alert rules, plan parsing,
   ProPresenter auto-tracking, organizations and settings validation.
 
+## Accounts and sign-in
+
+Everyone gets their own sign-in, replacing the shared admin PIN:
+1. Go to **Settings → Accounts & sign-in → Create the admin account**. This becomes the **owner** account, an admin in every organization. If an admin PIN was set, you need it once to claim the dashboard.
+2. Choose a role, click **Create invite link**, then text or email the link, or let people scan its QR code. They pick their own name and password. Links expire after 1, 7 or 30 days, and you can cancel them.
+3. Roles are **per organization**, so the same person can be crew at the church and a producer for the company:
+
+| Role | Can |
+|---|---|
+| **Crew** | Green room hand-offs (Picked up / On stage / Returned), notes and checklists, moving the plan along |
+| **Producer** | Everything crew can, plus the service plan, people and mics, dashboards, stage messages and comms control |
+| **Admin** | Everything, including gear, settings, organizations, accounts and updates |
+
+Viewing dashboards stays open on your network, so TVs and confidence monitors keep working. To make everyone sign in first, turn on **Require sign-in to view dashboards**. The comms phone page never needs an account: crew sign in to comms with their name.
+
+Forgotten password: an admin clicks **Reset password** and passes on the temporary password. People change their own password from their name in the top bar. Accounts, sessions and invites are stored in the data folder (`users.json`, `sessions.json`). Passwords are stored only as scrypt hashes.
+
 ## Running it permanently
 
-Any Mac, Windows or Linux computer with Node.js 18 or newer will work. To keep it running after
-a reboot, use `pm2` (`npm i -g pm2 && pm2 start server/index.js --name wavs && pm2 save && pm2
-startup`), or a systemd service, or a launchd agent. Give the computer a fixed IP so the
-dashboard URL doesn't change.
+The installer above sets the dashboard up as a background service:
+- macOS: a launchd agent, `~/Library/LaunchAgents/com.wavs.dashboard.plist`
+- Linux: a systemd user service
+- Windows: a hidden script in the Startup folder
+
+Its log is in the data folder under `logs/dashboard.log`.
+
+| Command (in the dashboard folder) | Does |
+|---|---|
+| `npm run service:status` | Is it set up and running? |
+| `npm run service:stop` / `service:start` | Stop it until the next login, or start it again |
+| `npm run service:uninstall` | Stop it starting by itself |
+
+While the service is running, `npm start` reports that the dashboard is already running instead of starting a second copy.
+
+**Address.** The dashboard announces itself as **wavs.local** on your network (Bonjour/mDNS). It also answers on port 80 when it can, so no `:8080` is needed. Macs, iPhones, iPads and Windows 10+ understand `.local` names; some Android phones don't, so use the IP shown in Settings → This computer for those. To use a different name, set `WAVS_NAME=grace` (then it's `http://grace.local`). Give the computer a fixed IP if Android devices will use it.
+
+**Several host computers.** Any number of computers can host at the same time, for example your Mac for WAVS events and the church's computer for Sunday services. Each one runs its own organizations, accounts and comms. Give each computer its own name in **Settings → This computer** (e.g. `wavs` and `grace`), so they become `http://wavs.local` and `http://grace.local`. If another device already uses the name, Settings warns you. One organization runs live on one host at a time; changes don't sync between hosts.
+
+**Moving an organization to another computer.** In **Settings → Move to another computer**:
+1. On the old host, tick the organizations to move, optionally set a password, and click **Download backup**. You get a `.wavsbackup` file.
+2. On the new host, choose that file under **Import on this computer**. For each organization, choose **Add**, **Replace the one on this computer**, or **Add as a separate copy**.
+
+The file carries:
+- settings and gear
+- people and photos, dashboards, notes and plans
+- comms and the logo
+- the accounts that can use those organizations, so people sign in with the same passwords
+
+An account that already exists on the new computer keeps its password there and just gains the roles. The file holds secrets (the Planning Center key and scrambled passwords), so use a password and keep it private. A new computer can also import a backup straight from the setup wizard ("Moving from another computer?").
+
+**Updating.** In **Settings → This computer**, click **Check for updates**. It lists what's new, and **Update now** downloads and installs it. When the dashboard runs as the service, it restarts by itself and open screens reload. This needs a copy installed with git; ZIP downloads have to be replaced by hand. Your setup lives in the data folder, so updating never touches it.
