@@ -14,7 +14,10 @@ let ws;
 let ctx;
 let state = null;
 let localMic; // kept open: with microphone permission the browser shares real network addresses with phones
-const peers = new Map(); // memberId -> { pc, ready, el }
+const peers = new Map(); // memberId -> { pc, ready, el }  (direct WebRTC)
+const relays = new Map(); // memberId -> { player, cap }  (audio through the server)
+let sink; // silent output that keeps relay capture worklets running
+const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
 const speakers = new Map(); // key -> { node, analyser }
 const listeners = new Map(); // key -> { bus }
 const gains = new Map(); // "s|l" -> GainNode
@@ -27,6 +30,10 @@ $('start').onclick = async () => {
   try {
     ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
     await ctx.resume();
+    await ctx.audioWorklet.addModule('/js/comms-worklet.js');
+    sink = ctx.createGain();
+    sink.gain.value = 0;
+    sink.connect(ctx.destination);
     localMic = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
     $('startbox').classList.add('hidden');
     $('running').classList.remove('hidden');
@@ -39,13 +46,17 @@ window.addEventListener('beforeunload', (e) => { if (ctx) { e.preventDefault(); 
 
 function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws`);
+  ws.binaryType = 'arraybuffer';
   ws.onopen = () => send({ t: 'hello', role: 'engine', pin: localStorage.getItem('wavs-pin') || undefined });
   ws.onclose = () => {
-    for (const id of [...peers.keys()]) dropPeer(id);
+    for (const id of [...peers.keys(), ...relays.keys()]) dropPeer(id);
     status('Reconnecting to the dashboard…', false);
     if (!connect.stopped) setTimeout(connect, 1500);
   };
-  ws.onmessage = (ev) => onMessage(JSON.parse(ev.data));
+  ws.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) return onAudio(ev.data);
+    onMessage(JSON.parse(ev.data));
+  };
 }
 const send = (msg) => ws?.readyState === 1 && ws.send(JSON.stringify(msg));
 
@@ -53,12 +64,13 @@ function onMessage(msg) {
   switch (msg.t) {
     case 'state':
       state = msg.state;
-      for (const id of [...peers.keys()]) if (!state.members.some((m) => m.id === id && m.online)) dropPeer(id);
+      for (const id of [...peers.keys(), ...relays.keys()]) if (!state.members.some((m) => m.id === id && m.online)) dropPeer(id);
       syncPorts();
       applyMatrix();
       return render();
     case 'signal': return onSignal(msg.from, msg.data);
     case 'bye': dropPeer(msg.from); return applyMatrix();
+    case 'relay': startRelay(msg.from); return render();
     case 'replaced':
       connect.stopped = true;
       status('Another comms engine took over. This tab is no longer mixing.', false);
@@ -83,7 +95,7 @@ function onSignal(id, data) {
 
 function answer(id, sdp) {
   dropPeer(id);
-  const pc = new RTCPeerConnection({ iceServers: [] });
+  const pc = new RTCPeerConnection({ iceServers: ICE });
   const peer = { pc };
   peers.set(id, peer);
 
@@ -118,11 +130,46 @@ function answer(id, sdp) {
 
 function dropPeer(id) {
   const peer = peers.get(id);
-  if (!peer) return;
+  const rl = relays.get(id);
+  if (!peer && !rl) return;
   peers.delete(id);
-  peer.pc.close();
-  if (peer.el) peer.el.srcObject = null;
+  relays.delete(id);
+  if (peer) {
+    peer.pc.close();
+    if (peer.el) peer.el.srcObject = null;
+  }
+  if (rl) { rl.player.disconnect(); rl.cap.disconnect(); }
   removeEndpoint(`m:${id}`);
+}
+
+// ---------------------------------------------------------------- phones through the server (relay)
+
+const idBytes = (id) => new TextEncoder().encode(id.padEnd(8).slice(0, 8));
+
+function startRelay(id) {
+  dropPeer(id);
+  const player = new AudioWorkletNode(ctx, 'wavs-player'); // their voice
+  addSpeaker(`m:${id}`, player);
+  const bus = ctx.createGain(); // their mix
+  const cap = new AudioWorkletNode(ctx, 'wavs-capture', { processorOptions: { skipSilence: true } });
+  bus.connect(cap).connect(sink);
+  const head = idBytes(id);
+  cap.port.onmessage = (e) => {
+    if (ws?.readyState !== 1 || ws.bufferedAmount > 256000) return;
+    const out = new Uint8Array(8 + e.data.byteLength);
+    out.set(head);
+    out.set(new Uint8Array(e.data), 8);
+    ws.send(out);
+  };
+  listeners.set(`m:${id}`, { bus });
+  relays.set(id, { player, cap });
+  applyMatrix();
+}
+
+function onAudio(buf) {
+  const id = new TextDecoder().decode(new Uint8Array(buf, 0, 8)).trim();
+  const body = buf.slice(8);
+  relays.get(id)?.player.port.postMessage(body, [body]);
 }
 
 // ---------------------------------------------------------------- mixing
@@ -326,8 +373,8 @@ function render() {
   status('Running: phones can connect', true);
   $('eng-sub').textContent = `${on.length} on comms · ${speakers.size} audio sources · ${gains.size} routes`;
   const html = on.map((m) => {
-    const st = peers.get(m.id)?.pc.connectionState || 'waiting';
-    return `<div class="eng-person"><span class="dev-dot ${st === 'connected' ? 'on' : ''}"></span><b>${esc(m.name)}</b>
+    const st = relays.has(m.id) ? 'connected (via internet)' : peers.get(m.id)?.pc.connectionState || 'waiting';
+    return `<div class="eng-person"><span class="dev-dot ${st.startsWith('connected') ? 'on' : ''}"></span><b>${esc(m.name)}</b>
       <small class="muted">${esc(st)}</small><span class="lvl"><i data-lvl="m:${esc(m.id)}"></i></span></div>`;
   }).join('') || '<p class="muted small">Nobody on comms yet. Phones join at /comms.</p>';
   if ($('people')._html !== html) { $('people')._html = html; $('people').innerHTML = html; }

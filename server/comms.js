@@ -78,6 +78,12 @@ export class Comms extends EventEmitter {
     }, 200);
   }
 
+  /** How a member is connected: off-site (through the tunnel) and/or audio through the server. */
+  link(id) {
+    const ws = [...this.sockets].find((x) => x.role === 'member' && x.memberId === id);
+    return ws ? { offsite: ws.remote, relay: Boolean(ws.relay) } : {};
+  }
+
   online(id) { return [...this.sockets].some((ws) => ws.role === 'member' && ws.memberId === id); }
 
   /** What every client sees (tokens are never included). */
@@ -85,7 +91,7 @@ export class Comms extends EventEmitter {
     return {
       channels: this.data.channels,
       positions: this.data.positions,
-      members: this.data.members.map(({ token, passcode, ...m }) => ({ ...m, hasCode: Boolean(passcode), signedIn: Boolean(token), online: this.online(m.id), talking: this.talking[m.id] || {} })),
+      members: this.data.members.map(({ token, passcode, ...m }) => ({ ...m, hasCode: Boolean(passcode), signedIn: Boolean(token), online: this.online(m.id), talking: this.talking[m.id] || {}, ...this.link(m.id) })),
       ports: this.data.ports,
       access: { rosterOnly: this.data.access.rosterOnly, hasTeamPassword: Boolean(this.data.access.teamPassword) },
       engine: { online: Boolean(this.engine) },
@@ -124,8 +130,12 @@ export class Comms extends EventEmitter {
 
   attach(ws, req) {
     this.sockets.add(ws);
-    ws.isLocal = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
-    ws.on('message', (raw) => {
+    // Off-site phones come in through the tunnel (from 127.0.0.1) but are never "this computer".
+    ws.remote = Boolean(req.viaTunnel);
+    ws.isLocal = !ws.remote && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    ws.ip = (ws.remote && req.headers['cf-connecting-ip']) || req.socket.remoteAddress;
+    ws.on('message', (raw, isBinary) => {
+      if (isBinary) return this.audio(ws, raw);
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
       try { this.handle(ws, msg); } catch (e) { this.send(ws, { t: 'error', error: e.message }); }
@@ -163,6 +173,9 @@ export class Comms extends EventEmitter {
       case 'talk': return this.talk(ws, msg);
       case 'listen': return this.listen(ws, msg);
       case 'ack': return this.ack(ws, msg);
+      case 'relay':
+        if (ws.role === 'member') { ws.relay = true; this.send(this.engine, { t: 'relay', from: ws.memberId }); this.changed(); }
+        return;
       case 'levels':
         if (ws === this.engine) {
           this.levels = msg.levels || {};
@@ -185,7 +198,37 @@ export class Comms extends EventEmitter {
     }
   }
 
+  /**
+   * Audio relay for phones that can't reach the engine directly (hotspot, cellular, isolated Wi-Fi).
+   * Phone -> engine: the server prefixes the member id. Engine -> phone: "<id 8 bytes><audio>".
+   */
+  audio(ws, buf) {
+    if (buf.length > 4000) return;
+    if (ws.role === 'member') {
+      if (this.engine?.readyState === 1) this.engine.send(Buffer.concat([Buffer.from(ws.memberId.padEnd(8).slice(0, 8)), buf]), { binary: true });
+    } else if (ws === this.engine && buf.length > 8) {
+      const id = buf.subarray(0, 8).toString().trim();
+      const body = buf.subarray(8);
+      for (const s of this.sockets) if (s.role === 'member' && s.memberId === id && s.readyState === 1) s.send(body, { binary: true });
+    }
+  }
+
+  /** Slow down guessing of personal codes / the team password (counted per network address). */
+  tooManyTries(ws) {
+    const now = Date.now();
+    this.failures ||= new Map();
+    const f = this.failures.get(ws.ip);
+    return f && now - f.at < 10 * 60000 && f.n >= 8;
+  }
+
+  failed(ws) {
+    const now = Date.now();
+    const f = this.failures.get(ws.ip);
+    this.failures.set(ws.ip, f && now - f.at < 10 * 60000 ? { n: f.n + 1, at: f.at } : { n: 1, at: now });
+  }
+
   hello(ws, { role, token, pin }) {
+    if (ws.remote && (role === 'engine' || role === 'control')) throw new Error('Only the comms phone page is available off-site');
     if (role === 'engine') {
       // The mixer must run on the dashboard computer itself (or know the admin PIN).
       if (!ws.isLocal && !this.checkPin(pin)) throw new Error('The comms engine must run on the dashboard computer (or enter the admin PIN)');
@@ -225,19 +268,25 @@ export class Comms extends EventEmitter {
    * code if they have one) and get the position the producer set up. Others are added as new
    * people, unless the list is "roster only".
    */
-  join(ws, { name, position, teamPassword, code }) {
+  join(ws, msg) {
+    if (this.tooManyTries(ws)) throw new Error('Too many wrong tries. Wait 10 minutes, or ask the producer.');
+    try { this.joinAs(ws, msg); } catch (e) { if (e.wrong) this.failed(ws); throw e; }
+  }
+
+  joinAs(ws, { name, position, teamPassword, code }) {
+    const wrong = (text) => Object.assign(new Error(text), { wrong: true });
     if (!str(name)) throw new Error('Enter your name');
     const { access } = this.data;
-    if (access.teamPassword && !matches(access.teamPassword, teamPassword)) throw new Error("That team password isn't right");
+    if (access.teamPassword && !matches(access.teamPassword, teamPassword)) throw wrong("That team password isn't right");
     let m = this.data.members.find((x) => sameName(x.name, name));
     if (m) {
-      if (m.passcode && !matches(m.passcode, code)) throw new Error("Enter your personal code (ask the producer if you don't have it)");
+      if (m.passcode && !matches(m.passcode, code)) throw wrong("Enter your personal code (ask the producer if you don't have it)");
       if (!m.passcode && m.token && this.online(m.id)) throw new Error(`${m.name} is already signed in on another phone. Ask the producer to sign them out first.`);
       // A new sign-in replaces the old phone.
       for (const s of this.sockets) if (s.memberId === m.id) { this.send(s, { t: 'removed', reason: 'Signed in on another phone' }); s.close(); }
       m.token = crypto.randomBytes(18).toString('base64url');
     } else {
-      if (access.rosterOnly) throw new Error(`${str(name)} isn't on the comms list for ${this.orgName}. Check the spelling, or ask the producer to add you.`);
+      if (access.rosterOnly) throw wrong(`${str(name)} isn't on the comms list for ${this.orgName}. Check the spelling, or ask the producer to add you.`);
       const pos = this.data.positions.find((x) => x.id === position) || this.data.positions[this.data.positions.length - 1];
       m = {
         id: crypto.randomUUID().slice(0, 8), token: crypto.randomBytes(18).toString('base64url'), name: str(name, 40), passcode: null,

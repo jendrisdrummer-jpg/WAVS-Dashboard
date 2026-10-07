@@ -14,6 +14,7 @@ import { Runtime, checkPin } from './runtime.js';
 import QRCode from 'qrcode';
 import selfsigned from 'selfsigned';
 import { testDevice } from './testers.js';
+import { Tunnel, lanAddresses } from './tunnel.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
 // Planning Center) is per organization and edited in the browser. On first run the
@@ -212,17 +213,26 @@ app.post('/api/propresenter/:id/stage-message', requirePin, wrap(async (req, res
 }));
 
 // ---- comms: join links / QR code for phones
-function lanAddresses() {
-  return Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
-}
 app.get('/api/comms/info', (_req, res) => {
   const ips = lanAddresses();
+  const local = os.hostname().replace(/\.local$/i, '');
   res.json({
     httpsPort: tlsPort,
-    joinUrls: ips.map((ip) => `https://${ip}:${tlsPort}/comms`),
+    // Same Wi-Fi: every address this computer has (best guess first), plus its Bonjour name.
+    lan: [
+      ...ips.map((i) => ({ url: `https://${i.address}:${tlsPort}/comms`, label: `${i.address} (${i.iface})`, likely: i.likely })),
+      { url: `https://${local}.local:${tlsPort}/comms`, label: `${local}.local (name)`, likely: false },
+    ],
+    joinUrls: ips.map((i) => `https://${i.address}:${tlsPort}/comms`),
     hostname: os.hostname(),
+    httpUrl: ips[0] ? `http://${ips[0].address}:${cfg.server.port}` : null,
+    remote: { ...tunnel.state, enabled: tunnel.enabled, url: tunnel.state.url ? `${tunnel.state.url}/comms` : null },
   });
 });
+app.post('/api/comms/remote', requirePin, wrap(async (req, res) => {
+  tunnel.enable(Boolean(req.body?.on)); // starts in the background; status comes back through /api/comms/info
+  res.json({ ok: true });
+}));
 app.get('/api/comms/qr.svg', wrap(async (req, res) => {
   const url = String(req.query.url || '');
   if (!/^https?:\/\/[^\s]{1,200}$/.test(url)) throw new Error('Bad URL');
@@ -255,12 +265,34 @@ const commsWss = new WebSocketServer({ noServer: true }); // phones, comms engin
 commsWss.on('connection', (ws, req) => rt.comms.attach(ws, req));
 
 function upgrade(req, socket, head) {
+  req.viaTunnel = false;
   const { pathname } = new URL(req.url, 'http://x');
   if (pathname === '/ws') wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   else if (pathname === '/comms-ws') commsWss.handleUpgrade(req, socket, head, (ws) => commsWss.emit('connection', ws, req));
   else socket.destroy();
 }
 server.on('upgrade', upgrade);
+
+// ---------------------------------------------------------------- off-site comms (Cloudflare tunnel)
+// A separate local-only server that the tunnel points at. It serves the comms phone page and its
+// socket and nothing else, so the dashboard, settings and admin API are never reachable off-site.
+const remoteApp = express();
+remoteApp.disable('x-powered-by');
+const REMOTE_FILES = { '/comms': 'comms.html', '/css/app.css': 'css/app.css', '/js/comms.js': 'js/comms.js', '/js/comms-routing.js': 'js/comms-routing.js', '/js/comms-worklet.js': 'js/comms-worklet.js' };
+remoteApp.get('/', (_req, res) => res.redirect('/comms'));
+for (const [route, file] of Object.entries(REMOTE_FILES)) remoteApp.get(route, (_req, res) => res.sendFile(path.join(pub, file)));
+remoteApp.use((_req, res) => res.status(404).send('Not available off-site'));
+const remoteServer = http.createServer(remoteApp);
+remoteServer.on('upgrade', (req, socket, head) => {
+  if (new URL(req.url, 'http://x').pathname !== '/comms-ws') return socket.destroy();
+  req.viaTunnel = true; // never treated as "this computer", even though it arrives from 127.0.0.1
+  commsWss.handleUpgrade(req, socket, head, (ws) => commsWss.emit('connection', ws, req));
+});
+const tunnel = new Tunnel(dataDir, 0);
+remoteServer.listen(Number(process.env.COMMS_REMOTE_PORT) || 0, '127.0.0.1', () => {
+  tunnel.port = remoteServer.address().port;
+  if (tunnel.enabled) tunnel.start();
+});
 
 // HTTPS (self-signed) so phones may use their microphone for comms. Browsers only allow
 // microphones on https:// pages (or localhost). The certificate is created once and kept in data/tls/.
@@ -272,7 +304,7 @@ async function tlsOptions() {
   if (!fs.existsSync(keyFile)) {
     fs.mkdirSync(dir, { recursive: true });
     const altNames = [{ type: 2, value: 'localhost' }, { type: 2, value: os.hostname() }, { type: 2, value: `${os.hostname().replace(/\.local$/, '')}.local` },
-      { type: 7, ip: '127.0.0.1' }, ...lanAddresses().map((ip) => ({ type: 7, ip }))];
+      { type: 7, ip: '127.0.0.1' }, ...lanAddresses().map((i) => ({ type: 7, ip: i.address }))];
     const pems = await selfsigned.generate([{ name: 'commonName', value: 'WAVS Dashboard' }], { days: 3650, keySize: 2048, algorithm: 'sha256', extensions: [{ name: 'subjectAltName', altNames }] });
     fs.writeFileSync(keyFile, pems.private, { mode: 0o600 });
     fs.writeFileSync(certFile, pems.cert);
@@ -312,7 +344,7 @@ if (tlsPort) {
     secure.on('error', (e) => console.error(`[https] ${e.message}`));
     secure.listen(tlsPort, cfg.server.host, () => {
       const ips = lanAddresses();
-      console.log(`  Comms for phones: ${ips.length ? ips.map((ip) => `https://${ip}:${tlsPort}/comms`).join('  ') : `https://localhost:${tlsPort}/comms`}`);
+      console.log(`  Comms for phones: ${ips.length ? ips.map((i) => `https://${i.address}:${tlsPort}/comms`).join('  ') : `https://localhost:${tlsPort}/comms`}`);
     });
   }).catch((e) => console.error(`[https] could not start: ${e.message}`));
 }
@@ -320,6 +352,7 @@ if (tlsPort) {
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     rt?.stop();
+    tunnel.stop();
     server.close();
     process.exit(0);
   });

@@ -788,3 +788,17 @@ body.as-lead .lead-only-hide { display: none !important; }
 .dev.s-off .dev-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
 .page-head .row-btns { align-items: center; }
 .dlg-fields .f-row { align-items: start; }
+
+/* comms: join panel tabs, off-site access */
+.cc-join { display: grid; gap: 10px; }
+.cc-joinrow { display: flex; gap: 14px; align-items: flex-start; }
+.cc-tabs { display: flex; gap: 4px; background: var(--panel-2); padding: 3px; border-radius: 9px; width: max-content; }
+.cc-tabs button { border: 0; background: none; padding: 6px 12px; border-radius: 7px; font-weight: 700; cursor: pointer; color: var(--text-2); }
+.cc-tabs button.on { background: var(--accent); color: #fff; }
+.cc-tabs button:disabled { opacity: .45; cursor: default; }
+.cc-offsite { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cc-offsite > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.warn-text { color: var(--warning); }
+.cc-help summary { cursor: pointer; color: var(--text-2); font-weight: 600; font-size: 13px; }
+.cc-help ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; color: var(--text-2); }
+.f.small span { font-size: 12px; }
