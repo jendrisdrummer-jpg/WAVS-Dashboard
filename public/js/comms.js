@@ -395,7 +395,10 @@ function renderTalk() {
   const ptt = $('ptt');
   ptt.classList.toggle('on', ptting());
   const names = state.channels.filter((c) => talking.has(c.id) || (!ptting() && armed?.has(c.id))).map((c) => c.name);
-  ptt.innerHTML = ptting() ? `TALKING<small>${esc(names.join(' · '))}</small>` : `TALK${names.length ? `<small>${esc(names.join(' · '))}</small>` : ''}`;
+  // Like a Solidcom headset: tap for an open mic (tap again to close it), or hold to talk.
+  const how = latchMode === 'auto' ? 'tap: mic on · hold: talk' : 'hold to talk';
+  ptt.innerHTML = ptting() ? `🎙 MIC ON<small>${esc(names.join(' · '))}</small>`
+    : `MIC OFF<small>${names.length ? `${esc(names.join(' · '))} — ${how}` : 'pick a channel'}</small>`;
   ptt.style.setProperty('--ch', state.channels.find((c) => armed?.has(c.id))?.color || 'var(--accent)');
   for (const k of $('channels').querySelectorAll('[data-key]')) k.classList.toggle('talking', talking.has(k.dataset.key));
   const others = state.members.filter((m) => m.id !== me.id && m.online);

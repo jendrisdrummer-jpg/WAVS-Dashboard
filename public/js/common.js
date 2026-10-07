@@ -229,11 +229,11 @@ function renderHeader(page) {
     const sw = e.target.closest('[data-org]');
     if (sw && sw.dataset.org !== cfg.orgId) {
       const name = cfg.orgs.find((o) => o.id === sw.dataset.org)?.name;
-      if (!confirm(`Switch to ${name}?\n\nEvery screen will change to ${name}'s gear, people and dashboards.`)) return;
+      if (!await confirmBox(`Every screen will change to ${name}'s gear, people and dashboards.`, { title: `Switch to ${name}?`, ok: 'Switch', danger: false })) return;
       try { await api('POST', '/api/orgs/active', { id: sw.dataset.org }); } catch (err) { toast(err.message, true); }
     }
     if (e.target.closest('[data-org-add]')) {
-      const name = prompt('Name of the new organization (e.g. "Acme Productions")');
+      const name = await askText('Name', '', { title: 'New organization', ok: 'Add' });
       if (!name?.trim()) return;
       try { await api('POST', '/api/orgs', { name: name.trim() }); } catch (err) { toast(err.message, true); }
     }
@@ -308,10 +308,12 @@ document.addEventListener('click', async (e) => {
     location.href = '/login';
   }
   if (act === 'password') {
-    const current = prompt('Your current password');
-    if (current == null) return;
-    const next = prompt('New password (at least 8 characters)');
-    if (!next) return;
+    const r = await ask({ title: 'Change password', ok: 'Change password', fields: [
+      { name: 'current', label: 'Current password', type: 'password', required: true },
+      { name: 'next', label: 'New password (at least 8 characters)', type: 'password', required: true },
+    ] });
+    if (!r) return;
+    const { current, next } = r;
     try { await api('POST', '/api/auth/password', { current, next }); toast('Password changed'); } catch (err) { toast(err.message, true); }
   }
 });
@@ -488,7 +490,7 @@ export async function api(method, url, body) {
     await new Promise(() => {});
   }
   if (res.status === 401) {
-    const entered = prompt('Enter the admin PIN');
+    const entered = await askText('Admin PIN', '', { title: 'This needs the admin PIN', type: 'password' });
     if (entered == null) throw new Error('PIN required');
     localStorage.setItem('wavs-pin', entered);
     return api(method, url, body);
@@ -496,6 +498,60 @@ export async function api(method, url, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
+}
+
+// ---------------------------------------------------------------- in-page dialogs
+// Instead of the browser's prompt() / confirm() boxes: styled, work well on phones and tablets,
+// and can ask for several things at once.
+
+/**
+ * A small form. fields: [{ name, label, value, placeholder, type ('text' | 'password' | 'textarea'
+ * | 'select'), options: [[value, label]], required }]. Resolves to { name: value } or null (cancelled).
+ */
+export function ask({ title, message = '', fields = [], ok = 'Save', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dlg ask-dlg';
+    const field = (f) => {
+      const attrs = `name="${esc(f.name)}" ${f.required ? 'required' : ''} placeholder="${esc(f.placeholder || '')}" ${f.maxlength ? `maxlength="${f.maxlength}"` : ''}`;
+      const input = f.type === 'textarea' ? `<textarea ${attrs} rows="${f.rows || 4}">${esc(f.value ?? '')}</textarea>`
+        : f.type === 'select' ? `<select ${attrs}>${(f.options || []).map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(f.value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
+          : `<input type="${f.type || 'text'}" ${attrs} value="${esc(f.value ?? '')}" ${f.readonly ? 'readonly' : ''}>`;
+      return `<label>${esc(f.label || '')}${input}</label>`;
+    };
+    dlg.innerHTML = `<form method="dialog">
+      ${title ? `<h3>${esc(title)}</h3>` : ''}
+      ${message ? `<p class="ask-msg">${esc(message)}</p>` : ''}
+      ${fields.length ? `<div class="dlg-fields">${fields.map(field).join('')}</div>` : ''}
+      <div class="ask-btns"><button value="cancel" class="btn" formnovalidate>Cancel</button><button value="ok" class="btn ${danger ? 'danger-fill' : 'primary'}">${esc(ok)}</button></div>
+    </form>`;
+    document.body.append(dlg);
+    const form = dlg.querySelector('form');
+    let result = null;
+    form.addEventListener('submit', (e) => {
+      if (e.submitter?.value !== 'ok') return;
+      result = Object.fromEntries(fields.map((f) => [f.name, form.elements[f.name].value]));
+    });
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(result); });
+    dlg.showModal();
+    const first = form.querySelector('input:not([readonly]), textarea, select');
+    if (first) { first.focus(); first.select?.(); }
+  });
+}
+
+/** Like prompt(): one text box; resolves to the text, or null if cancelled. */
+export async function askText(label, value = '', { title = '', ok = 'OK', type = 'text' } = {}) {
+  const r = await ask({ title, fields: [{ name: 'v', label, value, type }], ok });
+  return r ? r.v : null;
+}
+
+/** Like confirm(): resolves true / false. danger: a red button for things that delete or end. */
+export async function confirmBox(message, { title = '', ok, danger } = {}) {
+  const verb = `${title} ${message}`.match(/\b(delete|remove|clear|stop|end|undo|sign \w+ out)\b/i)?.[1];
+  const destructive = danger ?? Boolean(verb && !/^undo$/i.test(verb));
+  const label = ok || (verb ? verb[0].toUpperCase() + verb.slice(1).toLowerCase() : 'OK');
+  const r = await ask({ title, message, ok: label, danger: destructive });
+  return Boolean(r);
 }
 
 /** Set innerHTML only when it changed (keeps focus, scroll and animations intact). */

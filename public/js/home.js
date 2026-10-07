@@ -1,5 +1,5 @@
 // Home: what's happening now, where to go, and whether the gear is healthy.
-import { start, store, onRender, esc, setHTML, icon, fmtDuration, can, api, toast } from './common.js';
+import { start, store, onRender, esc, setHTML, icon, fmtDuration, can, api, toast, confirmBox } from './common.js';
 import { currentInfo, serviceClock, planSource } from './plan.js';
 import { fmtWhen, fmtIn, micChanges, changesHtml, scheduleAction } from './schedulekit.js';
 
@@ -68,7 +68,7 @@ document.getElementById('sched').addEventListener('click', async (e) => {
   if (scheduleAction(e)) return;
   if (!e.target.closest('[data-next]')) return;
   const next = store.schedule.services.find((s) => s.id === store.schedule.nextId);
-  if (!next || !confirm(`Go to “${next.name}” now? Its mic plan and order of service are loaded, and everyone's mic goes back to “Assigned”.`)) return;
+  if (!next || !await confirmBox(`Go to “${next.name}” now? Its mic plan and order of service are loaded, and everyone's mic goes back to “Assigned”.`)) return;
   try { await api('POST', '/api/schedule/next'); toast(`${next.name} is live`); } catch (err) { toast(err.message, true); }
 });
 

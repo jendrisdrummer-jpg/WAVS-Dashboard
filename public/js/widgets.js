@@ -8,9 +8,7 @@
 // Option field types: text | textarea | number | checkbox | select (choices: () => [[value, label]])
 //                     multi (several of choices) | mics. An option's `group` puts it under a heading.
 // `presets` (optional) adds ready-made variants of a widget to the Add widget panel.
-import {
-  store, esc, setHTML, api, toast, fmtDuration, micView, applyMeters,
-} from './common.js';
+import { store, esc, setHTML, api, toast, fmtDuration, micView, applyMeters, confirmBox } from './common.js';
 import { buildTile } from './video.js';
 import { spacingConflicts, drawSpectrum, rfRows } from './views.js';
 import { planTiming, currentInfo, serviceClock, planSource, noServiceText } from './plan.js';
@@ -584,7 +582,7 @@ export const WIDGETS = {
         try {
           if (b.dataset.pin) await api('POST', '/api/streams/pin', { id: b.dataset.pin });
           if (b.dataset.unpin != null) await api('POST', '/api/streams/pin', { id: null });
-          if (b.dataset.hide && confirm('Hide this comment from the dashboards? (It stays on YouTube/Facebook.)')) await api('POST', '/api/streams/hide', { id: b.dataset.hide });
+          if (b.dataset.hide && await confirmBox('Hide this comment from the dashboards? (It stays on YouTube/Facebook.)')) await api('POST', '/api/streams/hide', { id: b.dataset.hide });
         } catch (err) { toast(err.message, true); }
       });
       let stick = true;
@@ -699,8 +697,8 @@ export const WIDGETS = {
         const cb = e.target.closest('input[data-id]');
         if (cb) api('POST', `/api/checklists/${encodeURIComponent(name)}/toggle`, { itemId: cb.dataset.id, done: cb.checked }).catch((err) => toast(err.message, true));
       });
-      ctx.addAction('↺', 'Untick everything', () => {
-        if (confirm('Untick every item on this checklist?')) api('POST', `/api/checklists/${encodeURIComponent(name)}/reset`).catch((err) => toast(err.message, true));
+      ctx.addAction('↺', 'Untick everything', async () => {
+        if (await confirmBox('Untick every item on this checklist?')) api('POST', `/api/checklists/${encodeURIComponent(name)}/reset`).catch((err) => toast(err.message, true));
       });
       ctx.addAction('✎', 'Edit items', async () => {
         if (!editing) {

@@ -1,4 +1,4 @@
-import { start, store, onRender, esc, avatar, micView, api, toast, STATUS_LABEL, KIND_ICON, battery, fitFace, photoUrl } from './common.js';
+import { start, store, onRender, esc, avatar, micView, api, toast, STATUS_LABEL, KIND_ICON, battery, fitFace, photoUrl, confirmBox, askText } from './common.js';
 import { colorFor } from './micviews.js';
 import { findFace, scanFaces, faceSummary, scan } from './faces.js';
 import { planSource } from './plan.js';
@@ -21,7 +21,7 @@ serviceForm.onsubmit = async (e) => {
   } catch (err) { toast(err.message, true); }
 };
 document.getElementById('clear-all').onclick = async () => {
-  if (!confirm('Clear every mic assignment? (People and photos are kept.)')) return;
+  if (!await confirmBox('Clear every mic assignment? (People and photos are kept.)')) return;
   try { await api('POST', '/api/assignments/clear'); toast('All assignments cleared'); } catch (err) { toast(err.message, true); }
 };
 
@@ -42,7 +42,7 @@ document.getElementById('use-pp').onclick = async () => {
   try { await api('POST', '/api/service/propresenter'); toast('Following the ProPresenter playlist'); } catch (err) { toast(err.message, true); }
 };
 document.getElementById('reset-progress').onclick = async () => {
-  if (!confirm('Clear the current item and recorded item times?')) return;
+  if (!await confirmBox('Clear the current item and recorded item times?')) return;
   try { await api('POST', '/api/service/reset'); toast('Progress reset'); } catch (err) { toast(err.message, true); }
 };
 pcoEl.addEventListener('click', async (e) => {
@@ -105,12 +105,12 @@ peopleEl.addEventListener('click', async (e) => {
   const person = store.greenroom.people.find((p) => p.id === id);
   try {
     if (btn.dataset.act === 'delete') {
-      if (!confirm(`Remove ${person.name}? Their photo and any mic assignment are removed too.`)) return;
+      if (!await confirmBox(`Remove ${person.name}? Their photo and any mic assignment are removed too.`)) return;
       await api('DELETE', `/api/people/${id}`);
     } else if (btn.dataset.act === 'edit') {
-      const name = prompt('Name', person.name);
+      const name = await askText('Name', person.name);
       if (name == null) return;
-      const role = prompt('Role (e.g. Worship Leader, Host, Guest Speaker)', person.role || '');
+      const role = await askText('Role (e.g. Worship Leader, Host, Guest Speaker)', person.role || '');
       if (role == null) return;
       const fd = new FormData();
       fd.set('name', name);

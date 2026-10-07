@@ -1121,3 +1121,9 @@ body.as-lead .lead-only-hide { display: none !important; }
 .aio-end { grid-column: 2 / -1; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .g-ok-text { color: var(--good); font-weight: 700; }
 @media (max-width: 700px) { .aio-row { grid-template-columns: 44px 1fr; } .aio-row > label { grid-column: 2; } }
+
+/* In-page dialogs (ask / confirmBox) */
+.ask-dlg { width: min(460px, calc(100vw - 32px)); }
+.ask-msg { margin: 0; white-space: pre-line; color: var(--text); line-height: 1.45; }
+.ask-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.btn.danger-fill { background: var(--critical); border-color: var(--critical); color: #fff; }

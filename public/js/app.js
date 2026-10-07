@@ -1,5 +1,5 @@
 // Dashboard page: shows one saved dashboard (a grid of widgets) and lets you build / edit them.
-import { start, store, onRender, onMeters, esc, api, toast, uid } from './common.js';
+import { start, store, onRender, onMeters, esc, api, toast, uid, confirmBox, askText } from './common.js';
 import { WIDGETS, CATEGORIES } from './widgets.js';
 
 await start({ page: 'dash' });
@@ -328,19 +328,19 @@ function renderHeader() {
   on('edit', () => setEditing(true));
   on('tvlink', async () => {
     const url = `${store.config.tvBase}/tv/${encodeURIComponent(store.config.orgId)}/${encodeURIComponent(current.id)}`;
-    try { await navigator.clipboard.writeText(url); toast(`TV link for “${current.name}” copied. Paste it into AbleSign (or the TV's browser).`); } catch { prompt(`TV link for “${current.name}”`, url); }
+    try { await navigator.clipboard.writeText(url); toast(`TV link for “${current.name}” copied. Paste it into AbleSign (or the TV's browser).`); } catch { await askText(`TV link for “${current.name}”`, url); }
   });
   on('kiosk', () => { const u = new URL(location.href); u.searchParams.set('kiosk', '1'); location.href = u; });
   on('save', save);
   on('cancel', () => { setEditing(false); current = store.dashboards.find((d) => d.id === current.id) || current; build(); });
-  on('rename', () => {
-    const name = prompt('Dashboard name', current.name);
+  on('rename', async () => {
+    const name = await askText('Dashboard name', current.name);
     if (name?.trim()) { current.name = name.trim(); renderHeader(); toast('Name changes when you Save'); }
   });
   on('dup', () => createDashboard(`${current.name} copy`, current.id));
   on('new', () => createDashboard('New dashboard'));
   on('del', async () => {
-    if (!confirm(`Delete the “${current.name}” dashboard?`)) return;
+    if (!await confirmBox(`Delete the “${current.name}” dashboard?`)) return;
     try {
       await api('DELETE', `/api/dashboards/${current.id}`);
       setEditing(false);
@@ -354,7 +354,7 @@ function renderHeader() {
 }
 
 async function createDashboard(name, copyFrom) {
-  const n = prompt('Name for the new dashboard (e.g. "Camera Ops", "Lobby TV")', name);
+  const n = await askText('Name for the new dashboard (e.g. "Camera Ops", "Lobby TV")', name);
   if (!n?.trim()) return;
   try {
     const d = await api('POST', '/api/dashboards', { name: n.trim(), copyFrom });

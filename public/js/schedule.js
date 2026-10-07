@@ -1,6 +1,6 @@
 // Schedule: services planned ahead (events with several sessions, repeating Sundays), which one
 // is live, and when the next one goes live by itself.
-import { start, store, onRender, esc, setHTML, api, toast } from './common.js';
+import { start, store, onRender, esc, setHTML, api, toast, confirmBox, askText } from './common.js';
 import { WEEKDAYS, fmtDay, fmtTime, fmtWhen, fmtIn, micChanges, changesHtml, planLabel, scheduleAction } from './schedulekit.js';
 
 await start({ page: 'schedule' });
@@ -94,7 +94,7 @@ document.getElementById('top').addEventListener('change', (e) => {
 document.getElementById('add-service').onclick = () => editService(null);
 document.getElementById('add-repeat').onclick = () => editService(null, { template: true });
 document.getElementById('add-event').onclick = async () => {
-  const name = prompt('Event name (e.g. "Spring Conference 2026")');
+  const name = await askText('Event name (e.g. "Spring Conference 2026")');
   if (!name?.trim()) return;
   let ev;
   await call(async () => { ev = await api('POST', '/api/schedule/events', { name }); });
@@ -109,28 +109,28 @@ for (const id of ['list', 'repeats']) {
     const sc = sched();
     if (d.live) {
       const s = sc.services.find((x) => x.id === d.live);
-      if (confirm(`Make “${s.name}” the live service now? Its mic plan and order of service are loaded, and everyone's mic goes back to “Assigned”.`)) call(() => api('POST', `/api/schedule/services/${d.live}/live`), `${s.name} is live`);
+      if (await confirmBox(`Make “${s.name}” the live service now? Its mic plan and order of service are loaded, and everyone's mic goes back to “Assigned”.`)) call(() => api('POST', `/api/schedule/services/${d.live}/live`), `${s.name} is live`);
     } else if (d.edit) editService(sc.services.find((x) => x.id === d.edit));
     else if (d.dup) {
       const s = sc.services.find((x) => x.id === d.dup);
       call(async () => { const copy = await api('POST', `/api/schedule/services/${d.dup}/duplicate`, { name: s.name }); editService(copy); });
     } else if (d.del) {
       const s = sc.services.find((x) => x.id === d.del);
-      if (confirm(`Delete “${s.name}” (${fmtWhen(s.start)})?`)) call(() => api('DELETE', `/api/schedule/services/${d.del}`), 'Deleted');
+      if (await confirmBox(`Delete “${s.name}” (${fmtWhen(s.start)})?`)) call(() => api('DELETE', `/api/schedule/services/${d.del}`), 'Deleted');
     } else if (d.editT) editService(sc.templates.find((t) => t.id === d.editT), { template: true });
     else if (d.delT) {
       const t = sc.templates.find((x) => x.id === d.delT);
-      if (confirm(`Stop repeating “${t.name}”? Upcoming ones you haven't changed are removed; ones you changed stay.`)) call(() => api('DELETE', `/api/schedule/templates/${d.delT}`), 'Stopped');
+      if (await confirmBox(`Stop repeating “${t.name}”? Upcoming ones you haven't changed are removed; ones you changed stay.`)) call(() => api('DELETE', `/api/schedule/templates/${d.delT}`), 'Stopped');
     } else if (d.addTo) editService(null, { eventId: d.addTo });
     else if (d.renE) {
       const ev = sc.events.find((x) => x.id === d.renE);
-      const name = prompt('Event name', ev.name);
+      const name = await askText('Event name', ev.name);
       if (name?.trim()) call(() => api('PUT', `/api/schedule/events/${ev.id}`, { name }));
     } else if (d.delE) {
       const ev = sc.events.find((x) => x.id === d.delE);
       const n = sc.services.filter((s) => s.eventId === ev.id).length;
-      if (!confirm(`Delete the event “${ev.name}”?`)) return;
-      const withServices = n > 0 && confirm(`Also delete its ${n} service${n === 1 ? '' : 's'}? (Cancel keeps them as separate services.)`);
+      if (!await confirmBox(`Delete the event “${ev.name}”?`)) return;
+      const withServices = n > 0 && await confirmBox(`Also delete its ${n} service${n === 1 ? '' : 's'}? (Cancel keeps them as separate services.)`);
       call(() => api('DELETE', `/api/schedule/events/${ev.id}${withServices ? '?services=1' : ''}`), 'Deleted');
     } else if ('earlier' in d) { showEarlier = !showEarlier; render(); }
   });

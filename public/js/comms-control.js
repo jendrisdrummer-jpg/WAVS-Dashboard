@@ -1,5 +1,5 @@
 // Comms control: for the producer (admin PIN) or a lead (signed in on comms as a lead).
-import { start, store, esc, setHTML, toast, api } from './common.js';
+import { start, store, esc, setHTML, toast, api, confirmBox, askText } from './common.js';
 
 await start({ page: 'comms' });
 
@@ -13,7 +13,7 @@ function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws`);
   ws.onopen = () => hello();
   ws.onclose = () => setTimeout(connect, 1500);
-  ws.onmessage = (ev) => {
+  ws.onmessage = async (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.t === 'state') { state = msg.state; if (msg.levels) levels = msg.levels; if ('asLead' in msg) asLead = msg.asLead; render(); }
     else if (msg.t === 'levels') { levels = msg.levels; meters(); }
@@ -24,7 +24,7 @@ function connect() {
         return;
       }
       if (msg.error === 'PIN required') {
-        const pin = prompt('Enter the admin PIN to control comms');
+        const pin = await askText('Enter the admin PIN to control comms');
         if (pin == null) { $('sub').textContent = 'The admin PIN is needed to control comms.'; return; }
         localStorage.setItem('wavs-pin', pin);
         return hello(true);
@@ -100,7 +100,7 @@ $('join').addEventListener('click', async (e) => {
   if (t && !t.disabled) { tab = t.dataset.tab; renderJoin(); }
   if (e.target.id === 'offsite-toggle') {
     const on = !info.remote?.enabled;
-    if (on && !confirm('Turn on off-site access?\n\nPhones on any network (mobile data, a hotspot) can then join comms through a secure Cloudflare link. Your team can also open the dashboard through it after signing in with their account.')) return;
+    if (on && !await confirmBox('Turn on off-site access?\n\nPhones on any network (mobile data, a hotspot) can then join comms through a secure Cloudflare link. Your team can also open the dashboard through it after signing in with their account.')) return;
     try { await api('POST', '/api/comms/remote', { on }); } catch (err) { return toast(err.message, true); }
     if (on) tab = 'anywhere';
     refreshInfo();
@@ -204,11 +204,11 @@ function renderPeople() {
   meters();
 }
 
-$('people').addEventListener('click', (e) => {
+$('people').addEventListener('click', async (e) => {
   const row = e.target.closest('[data-id]');
   if (!row) return;
   const id = row.dataset.id;
-  const m = state.members.find((x) => x.id === id);
+  const m = state.members.find(async (x) => x.id === id);
   const perm = e.target.closest('[data-perm]');
   if (perm) {
     const cur = m.perms?.[perm.dataset.ch] || {};
@@ -219,18 +219,18 @@ $('people').addEventListener('click', (e) => {
   e.target.closest('details')?.removeAttribute('open');
   if (act === 'mute') send({ t: 'mute', memberId: id, on: !m.muted });
   if (act === 'lead') send({ t: 'lead', memberId: id, on: !m.lead });
-  if (act === 'rename') { const n = prompt('Name', m.name); if (n?.trim()) send({ t: 'edit', memberId: id, name: n }); }
+  if (act === 'rename') { const n = await askText('Name', m.name); if (n?.trim()) send({ t: 'edit', memberId: id, name: n }); }
   if (act === 'code') {
-    const c = prompt(`Personal code for ${m.name}.\nThey type it when signing in, so nobody else can sign in as them.\nLeave empty to remove it.`, '');
+    const c = await askText(`Personal code for ${m.name}.\nThey type it when signing in, so nobody else can sign in as them.\nLeave empty to remove it.`, '');
     if (c != null) send({ t: 'edit', memberId: id, code: c });
   }
-  if (act === 'signout' && confirm(`Sign ${m.name} out? They can sign in again with their name.`)) send({ t: 'signout', memberId: id });
-  if (act === 'remove' && confirm(`Remove ${m.name} from comms?`)) send({ t: 'remove', memberId: id });
+  if (act === 'signout' && await confirmBox(`Sign ${m.name} out? They can sign in again with their name.`)) send({ t: 'signout', memberId: id });
+  if (act === 'remove' && await confirmBox(`Remove ${m.name} from comms?`)) send({ t: 'remove', memberId: id });
 });
-$('people').addEventListener('change', (e) => {
+$('people').addEventListener('change', async (e) => {
   if (e.target.dataset.act !== 'position') return;
   const id = e.target.closest('[data-id]').dataset.id;
-  if (confirm('Switch position? Their channels reset to that position\'s defaults.')) send({ t: 'position', memberId: id, position: e.target.value });
+  if (await confirmBox('Switch position? Their channels reset to that position\'s defaults.')) send({ t: 'position', memberId: id, position: e.target.value });
   else render();
 });
 
@@ -259,9 +259,9 @@ function renderAccess() {
     ${state.access.hasTeamPassword ? '<button class="btn small danger" id="team-clear">Remove</button>' : ''}</div>`);
 }
 $('access').addEventListener('change', (e) => { if (e.target.id === 'roster-only') send({ t: 'access', rosterOnly: e.target.checked }); });
-$('access').addEventListener('click', (e) => {
-  if (e.target.id === 'team-set') { const p = prompt('Team password'); if (p?.trim()) send({ t: 'access', teamPassword: p.trim() }); }
-  if (e.target.id === 'team-clear' && confirm('Remove the team password?')) send({ t: 'access', teamPassword: '' });
+$('access').addEventListener('click', async (e) => {
+  if (e.target.id === 'team-set') { const p = await askText('Team password'); if (p?.trim()) send({ t: 'access', teamPassword: p.trim() }); }
+  if (e.target.id === 'team-clear' && await confirmBox('Remove the team password?')) send({ t: 'access', teamPassword: '' });
 });
 
 // Channels editor (local draft until Save)
@@ -281,11 +281,11 @@ $('channels').addEventListener('input', (e) => {
   chDraft[row.dataset.i][e.target.dataset.k] = e.target.value;
   $('ch-btns').innerHTML = chButtons();
 });
-$('channels').addEventListener('click', (e) => {
+$('channels').addEventListener('click', async (e) => {
   if (e.target.closest('[data-del]')) {
     chDraft ||= structuredClone(state.channels);
     const i = Number(e.target.closest('[data-i]').dataset.i);
-    if (!confirm(`Delete channel "${chDraft[i].name}"? People lose access to it.`)) return;
+    if (!await confirmBox(`Delete channel "${chDraft[i].name}"? People lose access to it.`)) return;
     chDraft.splice(i, 1);
     renderChannels();
   }

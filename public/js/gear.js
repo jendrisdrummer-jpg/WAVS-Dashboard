@@ -1,5 +1,5 @@
 // Gear page: is everything connected? Add, edit, test and remove devices.
-import { start, store, onRender, esc, api, toast, icon, setHTML } from './common.js';
+import { start, store, onRender, esc, api, toast, icon, setHTML, confirmBox } from './common.js';
 import { deviceForm, enhanceForm, readForm, runTest, KIND_LABEL } from './forms.js';
 
 await start({ page: 'gear' });
@@ -156,7 +156,7 @@ document.getElementById('sections').addEventListener('click', async (e) => {
   }
   if (act === 'remove') {
     const d = sec.list(settings)[i];
-    if (!confirm(`Remove ${d.name || d.label}?`)) return;
+    if (!await confirmBox(`Remove ${d.name || d.label}?`)) return;
     await save(sec.set(settings, sec.list(settings).filter((_, j) => j !== i)), 'Removed');
   }
 });
