@@ -1020,7 +1020,8 @@ body.as-lead .lead-only-hide { display: none !important; }
 .sch-now { display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: center; }
 .sch-now > div { display: grid; gap: 2px; min-width: 0; }
 .sch-now b { font-size: 18px; }
-.sch-now > .btn { justify-self: start; }
+.sch-now-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+.sched-row { display: flex; gap: 6px; }
 .sch-auto { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
 .sch-day { margin: 14px 0 6px; font-weight: 800; color: var(--text-2); text-transform: uppercase; font-size: 12px; letter-spacing: .04em; }
 .sch-day:first-child { margin-top: 0; }
@@ -1053,6 +1054,7 @@ body.as-lead .lead-only-hide { display: none !important; }
 @media (max-width: 800px) {
   .sch-now, .home-sched .sched-card { grid-template-columns: 1fr; }
   .sched-btns { justify-items: start; grid-auto-flow: column; justify-content: start; }
+  .sch-now-btns { justify-content: flex-start; }
   .sch-row { grid-template-columns: 70px minmax(0, 1fr); }
   .sch-btns { grid-column: 1 / -1; justify-content: flex-start; }
   .sch-mic { grid-template-columns: 1fr 1fr; }

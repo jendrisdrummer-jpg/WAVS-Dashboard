@@ -66,16 +66,20 @@ export class Schedule extends EventEmitter {
   view() {
     const services = [...this.data.services].sort((a, b) => a.start.localeCompare(b.start));
     const live = this.live();
-    return { ...this.data, services, nextId: this.next()?.id || null, switchAt: live || services.length ? this.switchAt : null };
+    const { undo, ...data } = this.data; // (the saved green room / plan stays on the server)
+    return { ...data, canUndo: this.canUndo(), services, nextId: this.next()?.id || null, switchAt: live || services.length ? this.switchAt : null };
   }
 
   get(id) { return this.data.services.find((s) => s.id === id); }
   live() { return this.get(this.data.liveId) || null; }
 
-  /** The service after the live one (or the next upcoming one): what "Next service" goes to. */
-  next(now = Date.now()) {
+  /**
+   * The service after the live one (or the next upcoming one): what "Next service" goes to.
+   * auto: for going live by itself, which skips a service someone took back with Undo.
+   */
+  next(now = Date.now(), { auto = false } = {}) {
     const live = this.live();
-    const planned = this.data.services.filter((s) => s.state === 'planned').sort((a, b) => a.start.localeCompare(b.start));
+    const planned = this.data.services.filter((s) => s.state === 'planned' && !(auto && s.noAuto)).sort((a, b) => a.start.localeCompare(b.start));
     if (live) return planned.find((s) => s.start > live.start) || null;
     return planned.find((s) => new Date(s.start).getTime() + 4 * 3600 * 1000 > now) || null;
   }
@@ -88,7 +92,7 @@ export class Schedule extends EventEmitter {
   due(now = Date.now(), liveEnd = null) {
     this.switchAt = null;
     if (!this.data.auto) return null;
-    const next = this.next(now);
+    const next = this.next(now, { auto: true });
     if (!next) return null;
     const start = new Date(next.start).getTime();
     if (start + 4 * 3600 * 1000 < now) return null; // long gone: don't jump to it
@@ -152,17 +156,55 @@ export class Schedule extends EventEmitter {
     return this.addService({ name: name || `${s.name} (copy)`, start: start || s.start, eventId: s.eventId, plan: s.plan, mics: s.mics, notes: s.notes });
   }
 
-  /** Mark a service live (the previous one is done). Runtime.goLive loads it. */
-  setLive(id) {
+  /**
+   * Mark a service live (the previous one is done). Runtime.goLive loads it. undo: how things were
+   * just before (Runtime keeps the green room and plan in it), for "Undo".
+   */
+  setLive(id, { undo = null } = {}) {
     const s = this.get(id);
     if (!s) throw new Error('Service not found');
     const prev = this.live();
+    if (undo) this.data.undo = { ...undo, serviceId: id, prevLiveId: prev && prev.id !== id ? prev.id : null, at: new Date().toISOString() };
     if (prev && prev.id !== id) Object.assign(prev, { state: 'done', endedAt: new Date().toISOString() });
     Object.assign(s, { state: 'live', liveAt: new Date().toISOString() });
+    delete s.noAuto;
     this.data.liveId = id;
     // Keep finished services for two months before this one (a record of what happened).
     const cutoff = ymd(new Date(new Date(s.start).getTime() - 60 * DAY));
     this.data.services = this.data.services.filter((x) => x.state !== 'done' || x.start.slice(0, 10) >= cutoff);
+    this.save();
+    return s;
+  }
+
+  /** Can the live service be undone (put back to how things were before it went live)? */
+  canUndo() { return Boolean(this.data.undo && this.data.undo.serviceId === this.data.liveId); }
+
+  /**
+   * Undo going live: the service goes back to planned (and won't go live by itself again; use
+   * "Go live" or "Next service"), and the one that was live before is live again.
+   * Returns the saved green room / plan for Runtime to put back.
+   */
+  undoLive() {
+    const u = this.data.undo;
+    if (!this.canUndo()) throw new Error('Nothing to undo');
+    const s = this.get(u.serviceId);
+    Object.assign(s, { state: 'planned', noAuto: true });
+    delete s.liveAt;
+    const prev = u.prevLiveId && this.get(u.prevLiveId);
+    if (prev) { prev.state = 'live'; delete prev.endedAt; }
+    this.data.liveId = prev ? prev.id : null;
+    this.data.undo = null;
+    this.save();
+    return u;
+  }
+
+  /** End the live service: it's done, and nothing is live until the next one. */
+  endLive() {
+    const s = this.live();
+    if (!s) throw new Error('No service is live');
+    Object.assign(s, { state: 'done', endedAt: new Date().toISOString() });
+    this.data.liveId = null;
+    this.data.undo = null;
     this.save();
     return s;
   }

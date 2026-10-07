@@ -452,6 +452,8 @@ app.post('/api/schedule/next', need('producer'), wrap((_req, res) => {
   if (!next) throw new Error('Nothing else is scheduled. Add services on the Schedule page.');
   res.json(rt.goLive(next.id));
 }));
+app.post('/api/schedule/undo', need('producer'), wrap((_req, res) => { rt.undoLive(); res.json(rt.schedule.view()); }));
+app.post('/api/schedule/end', need('producer'), wrap((_req, res) => { rt.schedule.endLive(); rt.checkSchedule(); res.json(rt.schedule.view()); }));
 app.put('/api/schedule/options', need('producer'), wrap((req, res) => { rt.schedule.setOptions(req.body || {}); rt.checkSchedule(); res.json(rt.schedule.view()); }));
 app.post('/api/schedule/events', need('producer'), wrap((req, res) => res.json(rt.schedule.addEvent(req.body || {}))));
 app.put('/api/schedule/events/:id', need('producer'), wrap((req, res) => res.json(rt.schedule.updateEvent(req.params.id, req.body || {}))));

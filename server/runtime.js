@@ -163,6 +163,17 @@ export class Runtime extends EventEmitter {
     if (before !== this.schedule.switchAt) this.emit('message', { type: 'schedule', schedule: this.schedule.view() });
   }
 
+  /** Undo going live: the previous service, everyone's mics (and statuses) and the plan come back. */
+  undoLive() {
+    const u = this.schedule.undoLive();
+    this.store.data.service = u.greenroom.service;
+    this.store.data.assignments = u.greenroom.assignments;
+    this.store.save();
+    if (this.settings.control?.pushNamesToReceivers) for (const m of this.micSlots) this.pushName(m.id);
+    this.service.restore(u.plan);
+    console.log('[schedule] undid going live');
+  }
+
   /** When the live service is expected to end: its start plus the plan's length (or 75 minutes). */
   liveEnd() {
     const live = this.schedule.live();
@@ -177,7 +188,12 @@ export class Runtime extends EventEmitter {
    * playlist is followed (if it names one).
    */
   goLive(id, by = 'manual', { reloadPlan = true } = {}) {
-    const svc = this.schedule.setLive(id);
+    // How things are now, so "Undo" can put them back (not for edits to the live service).
+    const undo = by === 'edit' ? null : {
+      greenroom: structuredClone({ service: this.store.data.service, assignments: this.store.data.assignments }),
+      plan: structuredClone(this.service.saved),
+    };
+    const svc = this.schedule.setLive(id, { undo });
     const slots = new Set(this.micSlots.map((m) => m.id));
     const now = new Date().toISOString();
     const assignments = {};
