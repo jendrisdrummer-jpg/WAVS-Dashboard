@@ -1156,3 +1156,15 @@ body.as-lead .lead-only-hide { display: none !important; }
   .ta-pick:has(.ta-hint) { display: none; }
 }
 @media (min-width: 701px) and (max-width: 900px) { .ta-pick { bottom: 0; left: var(--rail); } }
+
+/* Alert snooze */
+.alert-snooze { margin-left: 6px; border: 1px solid rgba(255, 255, 255, .35); background: rgba(0, 0, 0, .25); color: #fff; border-radius: 999px; padding: 0 8px; cursor: pointer; font-size: 12px; font-weight: 700; line-height: 18px; }
+.alert-snooze:hover { background: rgba(255, 255, 255, .25); }
+.alert.snoozed { color: var(--text-2); border-color: var(--line); background: var(--panel-2); cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
+.alert.snoozed::before { content: none; }
+/* Problem dots on the navigation rail */
+.rail a, .rail button { position: relative; }
+.rail [data-dot]::after { content: ""; position: absolute; top: 7px; left: 30px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--panel); background: var(--warning); }
+.rail [data-dot="critical"]::after { background: var(--critical); animation: pulse-dot 1.2s infinite; }
+@keyframes pulse-dot { 50% { transform: scale(1.3); } }
+@media (max-width: 700px) { .rail [data-dot]::after { top: 6px; left: calc(50% + 6px); } }

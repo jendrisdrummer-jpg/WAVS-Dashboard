@@ -8,7 +8,7 @@
 // Option field types: text | textarea | number | checkbox | select (choices: () => [[value, label]])
 //                     multi (several of choices) | mics. An option's `group` puts it under a heading.
 // `presets` (optional) adds ready-made variants of a widget to the Add widget panel.
-import { store, esc, setHTML, api, toast, fmtDuration, micView, applyMeters, confirmBox } from './common.js';
+import { store, esc, setHTML, api, toast, fmtDuration, micView, applyMeters, confirmBox, alertChips } from './common.js';
 import { buildTile } from './video.js';
 import { spacingConflicts, drawSpectrum, rfRows } from './views.js';
 import { planTiming, currentInfo, serviceClock, planSource, noServiceText } from './plan.js';
@@ -626,7 +626,7 @@ export const WIDGETS = {
       return {
         update() {
           setHTML(body, store.alerts.length
-            ? `<div class="list">${store.alerts.map((a) => `<span class="alert ${a.level}">${esc(a.text)}</span>`).join('')}</div>`
+            ? `<div class="list">${alertChips(store.alerts)}</div>`
             : '<div class="w-empty ok">✓ All clear</div>');
         },
       };

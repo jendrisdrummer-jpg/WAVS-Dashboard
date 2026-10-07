@@ -252,8 +252,26 @@ export class Runtime extends EventEmitter {
     this.removeAllListeners();
   }
 
+  /**
+   * Snooze an alert for everyone (it comes back when the time is up, or straight away if it clears
+   * and happens again). minutes 0 = wake it now.
+   */
+  snooze(key, minutes) {
+    this.snoozed ||= new Map();
+    const m = Math.min(120, Math.max(0, Number(minutes) || 0));
+    if (m) this.snoozed.set(String(key), Date.now() + m * 60000); else this.snoozed.delete(String(key));
+    this.refreshAlerts();
+  }
+
   refreshAlerts() {
-    const next = computeAlerts(this.hub.state, this.store.data, this.micSlots, this.settings);
+    const now = Date.now();
+    const raw = computeAlerts(this.hub.state, this.store.data, this.micSlots, this.settings);
+    // Snoozes end when their time is up, or when the problem goes away.
+    if (this.snoozed?.size) {
+      const live = new Set(raw.map((a) => a.key));
+      for (const [k, until] of this.snoozed) if (until <= now || !live.has(k)) this.snoozed.delete(k);
+    }
+    const next = raw.map((a) => (this.snoozed?.has(a.key) ? { ...a, snoozedUntil: new Date(this.snoozed.get(a.key)).toISOString() } : a));
     if (JSON.stringify(next) !== JSON.stringify(this.alerts)) {
       this.alerts = next;
       this.emit('message', { type: 'alerts', alerts: next });

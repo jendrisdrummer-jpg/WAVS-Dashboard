@@ -386,6 +386,8 @@ app.put('/api/people/:id/face', need('producer'), wrap((req, res) => {
 }));
 app.delete('/api/people/:id', need('producer'), wrap((req, res) => { rt.store.removePerson(req.params.id); res.json({ ok: true }); }));
 
+// Alerts: snooze one for everyone for a few minutes (it comes back by itself), or wake it.
+app.post('/api/alerts/snooze', need('crew'), wrap((req, res) => { rt.snooze(String(req.body?.key || ''), req.body?.minutes ?? 10); res.json({ ok: true }); }));
 app.put('/api/assignments/:micId', need('crew'), wrap((req, res) => {
   if (!rt.micSlots.some((m) => m.id === req.params.micId)) throw new Error('Unknown mic');
   const result = rt.store.assign(req.params.micId, req.body || {});

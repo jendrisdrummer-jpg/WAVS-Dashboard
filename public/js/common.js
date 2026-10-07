@@ -113,15 +113,50 @@ function connect() {
 // ---------------------------------------------------------------- alerts + chime
 
 const seenCritical = new Set();
+/** Alerts that aren't snoozed (snoozed ones come back by themselves). */
+export const activeAlerts = () => store.alerts.filter((a) => !a.snoozedUntil);
+
 function setAlerts(alerts) {
-  const fresh = alerts.filter((a) => a.level === 'critical' && !seenCritical.has(a.key));
+  // Chime for new critical alerts, including ones coming back from a snooze.
+  const active = alerts.filter((a) => !a.snoozedUntil);
+  const fresh = active.filter((a) => a.level === 'critical' && !seenCritical.has(a.key));
   if (fresh.length && store.alerts !== undefined && store.config?.alerts?.sound && store.connected) chime();
   seenCritical.clear();
-  alerts.filter((a) => a.level === 'critical').forEach((a) => seenCritical.add(a.key));
+  active.filter((a) => a.level === 'critical').forEach((a) => seenCritical.add(a.key));
   store.alerts = alerts;
   const bar = document.querySelector('.alertbar');
-  if (bar) bar.innerHTML = alerts.map((a) => `<span class="alert ${a.level}">${esc(a.text)}</span>`).join('');
+  if (bar) bar.innerHTML = alertChips(alerts);
 }
+
+/**
+ * Alert chips with a 💤 button (snooze 10 minutes for every screen), plus one chip listing what's
+ * snoozed (click to bring them back now). Used by the alert bar, Home and the alerts widget.
+ */
+export function alertChips(alerts = store.alerts, { empty = '' } = {}) {
+  const canSnooze = can('crew') && !document.body.classList.contains('kiosk');
+  const active = alerts.filter((a) => !a.snoozedUntil);
+  const snoozed = alerts.filter((a) => a.snoozedUntil);
+  const mins = (a) => Math.max(1, Math.ceil((new Date(a.snoozedUntil) - Date.now()) / 60000));
+  const chips = active.map((a) => `<span class="alert ${a.level}">${esc(a.text)}${canSnooze ? `<button class="alert-snooze" data-snooze="${esc(a.key)}" title="Snooze 10 minutes on every screen (it comes back by itself)" >💤 Snooze</button>` : ''}</span>`);
+  if (snoozed.length) {
+    chips.push(`<button class="alert snoozed" ${canSnooze ? 'data-wake-all' : ''} title="${esc(snoozed.map((a) => `${a.text} (back in ${mins(a)} min)`).join('\n'))}${canSnooze ? '\nClick to bring them back now' : ''}">💤 ${snoozed.length} snoozed · back in ${Math.min(...snoozed.map(mins))} min</button>`);
+  }
+  return chips.join('') || empty;
+}
+
+// Keep "back in N min" current in the alert bar.
+setInterval(() => { const bar = document.querySelector('.alertbar'); if (bar && store.alerts.some((a) => a.snoozedUntil)) bar.innerHTML = alertChips(store.alerts); }, 30000);
+
+document.addEventListener('click', async (e) => {
+  const s = e.target.closest('[data-snooze]');
+  const w = e.target.closest('[data-wake-all]');
+  if (!s && !w) return;
+  e.preventDefault();
+  try {
+    if (s) { await api('POST', '/api/alerts/snooze', { key: s.dataset.snooze, minutes: 10 }); toast('Snoozed for 10 minutes on every screen'); }
+    else for (const a of store.alerts.filter((x) => x.snoozedUntil)) await api('POST', '/api/alerts/snooze', { key: a.key, minutes: 0 });
+  } catch (err) { toast(err.message, true); }
+});
 
 let audioCtx;
 function chime() {
@@ -258,7 +293,7 @@ const PHONE_MAIN = ['home', 'dash', 'greenroom', 'schedule'];
  */
 function renderRail(page) {
   const items = NAV.filter(([, , id]) => !NAV_ROLE[id] || can(NAV_ROLE[id]));
-  const link = ([href, label, id, ic]) => `<a href="${href}" class="${id === page ? 'active' : ''} ${PHONE_MAIN.includes(id) ? 'main' : ''}" title="${label}" aria-label="${label}">${icon(ic)}<span>${label}</span></a>`;
+  const link = ([href, label, id, ic]) => `<a href="${href}" data-nav="${id}" class="${id === page ? 'active' : ''} ${PHONE_MAIN.includes(id) ? 'main' : ''}" title="${label}" aria-label="${label}">${icon(ic)}<span>${label}</span></a>`;
   const rail = document.createElement('nav');
   rail.className = 'rail';
   rail.setAttribute('aria-label', 'Pages');
@@ -282,6 +317,25 @@ function renderRail(page) {
   const more = rail.querySelector('.rail-more');
   more.onclick = (e) => { e.stopPropagation(); const v = !rail.classList.contains('more-open'); rail.classList.toggle('more-open', v); more.setAttribute('aria-expanded', String(v)); };
   document.addEventListener('click', (e) => { if (!rail.contains(e.target)) rail.classList.remove('more-open'); });
+
+  // Problem dots: Gear when something is offline, Green Room when a mic needs attention.
+  const MIC_ALERT = /^(tx|batt|rf|int|mute):/;
+  const worst = (list) => (list.some((a) => a.level === 'critical') ? 'critical' : list.length ? 'warning' : '');
+  onRender(() => {
+    const active = activeAlerts();
+    const dots = {
+      gear: worst(active.filter((a) => /^(rx|pp|sw|ftb):/.test(a.key))),
+      greenroom: worst(active.filter((a) => MIC_ALERT.test(a.key))),
+    };
+    for (const a of rail.querySelectorAll('[data-nav]')) {
+      const d = dots[a.dataset.nav] || '';
+      if ((a.dataset.dot || '') !== d) { if (d) a.dataset.dot = d; else delete a.dataset.dot; }
+    }
+    // Phone "More" carries a dot when a page inside it has one.
+    const hidden = [...rail.querySelectorAll('[data-nav]:not(.main)')].map((a) => a.dataset.dot).filter(Boolean);
+    const md = hidden.includes('critical') ? 'critical' : hidden[0] || '';
+    if (md) more.dataset.dot = md; else delete more.dataset.dot;
+  });
 }
 
 function accountChip() {
@@ -415,7 +469,7 @@ export function micView(slot) {
   const a = store.greenroom.assignments[slot.id] || null;
   const person = a ? store.greenroom.people.find((p) => p.id === a.personId) : null;
   const txOn = Boolean(mic.txType) || (mic.rfDbm != null && mic.rfDbm > -110);
-  const alerting = store.alerts.some((al) => al.key.endsWith(`:${slot.id}`) && al.level !== 'warning');
+  const alerting = activeAlerts().some((al) => al.key.endsWith(`:${slot.id}`) && al.level !== 'warning');
   return { slot, mic, a, person, txOn, alerting };
 }
 

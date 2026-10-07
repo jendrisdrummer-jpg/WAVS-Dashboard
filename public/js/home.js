@@ -1,5 +1,5 @@
 // Home: what's happening now, where to go, and whether the gear is healthy.
-import { start, store, onRender, esc, setHTML, icon, fmtDuration, can, api, toast, confirmBox } from './common.js';
+import { start, store, onRender, esc, setHTML, icon, fmtDuration, can, api, toast, confirmBox, alertChips } from './common.js';
 import { currentInfo, serviceClock, planSource } from './plan.js';
 import { fmtWhen, fmtIn, micChanges, changesHtml, scheduleAction } from './schedulekit.js';
 
@@ -100,9 +100,7 @@ function render() {
     + `<a class="htile add" href="/dashboards?new=1">${icon('plus', 'ic htile-ic')}<b>New dashboard</b><small>Build one for a role or screen</small></a>`);
 
   setHTML(document.getElementById('gear'), gearSummary());
-  setHTML(document.getElementById('alerts'), store.alerts.length
-    ? store.alerts.map((a) => `<span class="alert ${a.level}">${esc(a.text)}</span>`).join('')
-    : '<div class="w-empty ok">✓ All clear</div>');
+  setHTML(document.getElementById('alerts'), alertChips(store.alerts, { empty: '<div class="w-empty ok">✓ All clear</div>' }));
 }
 
 onRender(render);
