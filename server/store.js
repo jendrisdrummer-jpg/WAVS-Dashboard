@@ -79,6 +79,7 @@ export class GreenroomStore extends EventEmitter {
     p.face = face?.none
       ? { photo, none: true, ar, by: manual ? 'manual' : 'auto' }
       : { photo, x: num(face?.x, 0, 1), y: num(face?.y, 0, 1), s: num(face?.s, 0.01, 1), ar, by: manual ? 'manual' : 'auto' };
+    if (Number.isInteger(face?.v) && face.v > 0 && face.v < 100) p.face.v = face.v; // which face finder measured it
     this.save();
     return p;
   }

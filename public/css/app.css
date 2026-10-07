@@ -1011,3 +1011,5 @@ body.as-lead .lead-only-hide { display: none !important; }
   .fp-square { width: 110px; height: 110px; }
   .fp-tall { width: 64px; height: 140px; }
 }
+.face-status { color: var(--text-2); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.face-status .bad-text { color: var(--critical); }

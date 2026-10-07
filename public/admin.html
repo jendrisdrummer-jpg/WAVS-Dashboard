@@ -69,7 +69,10 @@
           <label>Photo <input type="file" name="photo" accept="image/*"></label>
           <button class="btn primary" type="submit">Add person</button>
         </form>
-        <input type="search" id="search" placeholder="Search people…" aria-label="Search people" style="max-width:320px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+          <input type="search" id="search" placeholder="Search people…" aria-label="Search people" style="max-width:320px">
+          <span class="face-status small" id="face-status"></span>
+        </div>
         <div class="people" id="people"></div>
       </div>
     </div>

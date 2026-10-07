@@ -1,5 +1,5 @@
 // Dashboard page: shows one saved dashboard (a grid of widgets) and lets you build / edit them.
-import { start, store, onRender, onMeters, esc, api, toast } from './common.js';
+import { start, store, onRender, onMeters, esc, api, toast, uid } from './common.js';
 import { WIDGETS, CATEGORIES } from './widgets.js';
 
 await start({ page: 'dash' });
@@ -276,7 +276,7 @@ palette.addEventListener('click', (e) => {
   const w = WIDGETS[b.dataset.type];
   const preset = b.dataset.preset != null ? w.presets[Number(b.dataset.preset)] : null;
   const size = preset?.size || w.size;
-  const def = { id: crypto.randomUUID(), type: b.dataset.type, w: Math.min(size.w, 12), h: size.h, options: structuredClone(preset?.options || {}) };
+  const def = { id: uid(), type: b.dataset.type, w: Math.min(size.w, 12), h: size.h, options: structuredClone(preset?.options || {}) };
   const el = addWidget(def);
   el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 });
