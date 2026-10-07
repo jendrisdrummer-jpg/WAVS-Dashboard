@@ -1,5 +1,5 @@
 // Bits shared by the Schedule page and Home: dates, and what changes from one service to the next.
-import { store, esc } from './common.js';
+import { store, esc, api, toast } from './common.js';
 
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -57,4 +57,21 @@ export function planLabel(plan = {}) {
   if (plan.source === 'propresenter') return `Follows the ProPresenter playlist${plan.playlist ? ` “${esc(plan.playlist)}”` : ''}`;
   if (plan.source === 'pco') return `Planning Center: ${esc(plan.pcoTitle || 'plan')}${pl}`;
   return `Keeps the order of service that's loaded${pl}`;
+}
+
+/** "↶ Undo" and "End service" buttons (Home and the Schedule page). Returns true if it handled the click. */
+export function scheduleAction(e) {
+  const sc = store.schedule;
+  const live = sc.services.find((s) => s.id === sc.liveId);
+  if (!live) return false;
+  const run = (url, ok) => api('POST', url).then(() => toast(ok)).catch((err) => toast(err.message, true));
+  if (e.target.closest('[data-undo]')) {
+    if (confirm(`Undo “${live.name}” going live? Everything goes back to how it was just before: the service that was live, everyone's mics and the order of service. ${live.name} goes back to planned and won't go live by itself again (use Go live or Next service when you're ready).`)) run('/api/schedule/undo', 'Back to how it was');
+    return true;
+  }
+  if (e.target.closest('[data-end]')) {
+    if (confirm(`End “${live.name}”? It's marked done and nothing is live until the next service (which still goes live by itself at its usual time, if that's on).`)) run('/api/schedule/end', `${live.name} ended`);
+    return true;
+  }
+  return false;
 }

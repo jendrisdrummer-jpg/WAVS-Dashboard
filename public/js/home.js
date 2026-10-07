@@ -1,7 +1,7 @@
 // Home: what's happening now, where to go, and whether the gear is healthy.
 import { start, store, onRender, esc, setHTML, icon, fmtDuration, can, api, toast } from './common.js';
 import { currentInfo, serviceClock, planSource } from './plan.js';
-import { fmtWhen, fmtIn, micChanges, changesHtml } from './schedulekit.js';
+import { fmtWhen, fmtIn, micChanges, changesHtml, scheduleAction } from './schedulekit.js';
 
 await start({ page: 'home' });
 
@@ -54,11 +54,14 @@ function scheduleCard() {
     <div class="sched-col"><small class="muted">Up next</small><b>${next ? esc(next.name) : '—'}</b>
       <span class="muted">${next ? `${fmtWhen(next.start)}${sc.auto && sc.switchAt ? ` · goes live by itself ${fmtIn(sc.switchAt)}` : ''}` : 'Nothing else scheduled'}</span></div>
     ${live && next ? `<div class="sched-col sched-chg"><small class="muted">Mic changes for ${esc(next.name)}</small>${changesHtml(changes, { max: 6 })}</div>` : ''}
-    <div class="sched-btns">${next && can('producer') ? '<button class="btn primary" data-next>Next service ▶</button>' : ''}<a class="btn small" href="/schedule">Schedule</a></div>
+    <div class="sched-btns">${next && can('producer') ? '<button class="btn primary" data-next>Next service ▶</button>' : ''}
+      ${live && can('producer') ? `<span class="sched-row">${sc.canUndo ? `<button class="btn small" data-undo title="Put everything back to how it was before ${esc(live.name)} went live">↶ Undo</button>` : ''}<button class="btn small" data-end>End service</button></span>` : ''}
+      <a class="btn small" href="/schedule">Schedule</a></div>
   </div>`);
 }
 
 document.getElementById('sched').addEventListener('click', async (e) => {
+  if (scheduleAction(e)) return;
   if (!e.target.closest('[data-next]')) return;
   const next = store.schedule.services.find((s) => s.id === store.schedule.nextId);
   if (!next || !confirm(`Go to “${next.name}” now? Its mic plan and order of service are loaded, and everyone's mic goes back to “Assigned”.`)) return;

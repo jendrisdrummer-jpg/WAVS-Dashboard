@@ -86,3 +86,34 @@ test('schedule: weekly and every-other-week templates fill the weeks ahead', () 
   assert.equal(sc.data.services.filter((s) => s.name === 'Sunday 9:00').length, 0);
   assert.equal(ymd(new Date('2026-05-04T23:59')), '2026-05-04');
 }));
+
+test('schedule: undo going live puts the previous service back; the undone one waits to be started by hand', () => withSchedule((sc) => {
+  const a = sc.addService({ name: 'Session 1', start: '2026-05-02T09:00' });
+  const b = sc.addService({ name: 'Session 2', start: '2026-05-02T11:00' });
+  sc.setLive(a.id, { undo: { greenroom: 'before-a' } });
+  sc.setLive(b.id, { undo: { greenroom: 'before-b' } });
+  assert.ok(sc.canUndo());
+  assert.equal(sc.view().undo, undefined); // the saved state isn't sent to browsers
+
+  const u = sc.undoLive();
+  assert.equal(u.greenroom, 'before-b');
+  assert.equal(sc.data.liveId, a.id);
+  assert.equal(sc.get(a.id).state, 'live');
+  assert.equal(sc.get(a.id).endedAt, undefined);
+  assert.equal(sc.get(b.id).state, 'planned');
+  assert.ok(!sc.canUndo());
+  assert.throws(() => sc.undoLive(), /Nothing to undo/);
+
+  // It won't go live by itself again, but Next service still goes to it.
+  assert.equal(sc.due(at('2026-05-02T10:59'), at('2026-05-02T10:00')), null);
+  assert.equal(sc.next().id, b.id);
+  sc.setLive(b.id);
+  assert.equal(sc.get(b.id).noAuto, undefined);
+
+  // End: done, nothing live, no undo.
+  sc.endLive();
+  assert.equal(sc.data.liveId, null);
+  assert.equal(sc.get(b.id).state, 'done');
+  assert.ok(!sc.canUndo());
+  assert.throws(() => sc.endLive(), /No service is live/);
+}));

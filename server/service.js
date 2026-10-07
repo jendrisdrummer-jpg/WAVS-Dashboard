@@ -80,6 +80,17 @@ export class ServiceManager extends EventEmitter {
     };
   }
 
+  /** Put the plan back exactly as it was (Undo on the schedule): source, items, progress. */
+  restore(saved) {
+    if (!saved) return;
+    this.saved = { ...this.saved, ...structuredClone(saved) };
+    this.plan = this.saved.source === 'manual' ? this.saved.manual : this.saved.source === 'pco' ? this.plan : null;
+    this.save();
+    if (this.saved.source === 'pco') this.reloadPco();
+    this.emitState();
+    this.emit('planLoaded');
+  }
+
   /** Only follow this ProPresenter playlist ('' = whichever is active). */
   expectPlaylist(name) {
     const v = String(name || '').trim();

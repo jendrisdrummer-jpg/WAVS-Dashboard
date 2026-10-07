@@ -209,6 +209,16 @@ switches straight away. Going live loads the service's mics (everyone back to "A
 notes and order of service. Changes made on Service & People while a service is live are saved
 to it.
 
+**Undo / End.** "↶ Undo" (Home and Schedule) puts everything back to how it was just before the
+live service started: the service that was live before, everyone's mics and hand-off statuses,
+and the order of service with its progress. The undone service goes back to planned and won't
+go live by itself again; start it with Go live or Next service. "End service" marks the live one
+done, with nothing live until the next.
+
+Typed plan times never move the plan on by themselves: the current item changes when ProPresenter
+moves, Planning Center LIVE moves, or someone taps Next or an item. (The demo ProPresenter moves
+to its next playlist item every 45 seconds, so with it in Gear the plan appears to advance.)
+
 ## Service plan and auto-tracking
 
 ### Planning Center Services
