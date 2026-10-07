@@ -151,6 +151,7 @@ function applyTheme(cfg) {
 
 /** Small line icons (24px grid) for the menu and pages. */
 export const ICONS = {
+  menu: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>',
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
   grid: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/>',
@@ -209,9 +210,6 @@ function renderHeader(page) {
         </div>
       </div>
       <div data-slot class="slot"></div>
-      <nav class="nav">
-        ${NAV.filter(([, , id]) => !NAV_ROLE[id] || can(NAV_ROLE[id])).map(([href, label, id, ic]) => `<a href="${href}" class="${id === page ? 'active' : ''}" title="${label}">${icon(ic)}<span>${label}</span></a>`).join('')}
-      </nav>
       <div class="spacer"></div>
       <div data-slot-right class="slot"></div>
       ${accountChip()}
@@ -220,6 +218,7 @@ function renderHeader(page) {
     </div>
     <div class="alertbar" role="status" aria-live="polite"></div>`;
   document.body.prepend(header);
+  renderRail(page);
 
   const btn = header.querySelector('.org-btn');
   const menu = header.querySelector('.org-menu');
@@ -246,6 +245,41 @@ function renderHeader(page) {
     conn.textContent = store.connected ? 'Live' : 'Reconnecting…';
     header.querySelector('[data-service]').textContent = store.greenroom.service?.name || cfg.org.serviceName || '';
   });
+}
+
+// Pages that stay on the phone's bottom bar; the rest are under "More".
+const PHONE_MAIN = ['home', 'dash', 'greenroom', 'schedule'];
+
+/**
+ * Navigation: a slim icon rail down the left (☰ shows the names, remembered per browser).
+ * On phones it's a bottom bar with the main pages and "More" for the rest.
+ */
+function renderRail(page) {
+  const items = NAV.filter(([, , id]) => !NAV_ROLE[id] || can(NAV_ROLE[id]));
+  const link = ([href, label, id, ic]) => `<a href="${href}" class="${id === page ? 'active' : ''} ${PHONE_MAIN.includes(id) ? 'main' : ''}" title="${label}" aria-label="${label}">${icon(ic)}<span>${label}</span></a>`;
+  const rail = document.createElement('nav');
+  rail.className = 'rail';
+  rail.setAttribute('aria-label', 'Pages');
+  rail.innerHTML = `<button class="rail-toggle" type="button" title="Show page names" aria-label="Show page names">${icon('menu')}<span>Menu</span></button>
+    ${items.map(link).join('')}
+    <button class="rail-more" type="button" aria-label="More pages" aria-expanded="false">${icon('menu')}<span>More</span></button>`;
+  document.body.prepend(rail);
+  document.body.classList.add('has-rail');
+  let open = false;
+  try { open = localStorage.getItem('wavs-rail') === 'open'; } catch { /* storage unavailable */ }
+  const setOpen = (v) => {
+    open = v;
+    document.body.classList.toggle('rail-open', v);
+    rail.querySelector('.rail-toggle').title = v ? 'Hide page names' : 'Show page names';
+    try { localStorage.setItem('wavs-rail', v ? 'open' : 'closed'); } catch { /* ignore */ }
+    window.dispatchEvent(new Event('resize')); // dashboards re-fit their grid
+  };
+  setOpen(open);
+  rail.querySelector('.rail-toggle').onclick = () => setOpen(!open);
+  // Phone "More": shows every page above the bottom bar.
+  const more = rail.querySelector('.rail-more');
+  more.onclick = (e) => { e.stopPropagation(); const v = !rail.classList.contains('more-open'); rail.classList.toggle('more-open', v); more.setAttribute('aria-expanded', String(v)); };
+  document.addEventListener('click', (e) => { if (!rail.contains(e.target)) rail.classList.remove('more-open'); });
 }
 
 function accountChip() {
