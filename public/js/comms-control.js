@@ -208,7 +208,7 @@ $('people').addEventListener('click', async (e) => {
   const row = e.target.closest('[data-id]');
   if (!row) return;
   const id = row.dataset.id;
-  const m = state.members.find(async (x) => x.id === id);
+  const m = state.members.find((x) => x.id === id);
   const perm = e.target.closest('[data-perm]');
   if (perm) {
     const cur = m.perms?.[perm.dataset.ch] || {};
