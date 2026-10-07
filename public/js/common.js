@@ -43,13 +43,13 @@ export async function start({ page }) {
     await new Promise(() => {});
   }
   // A new organization goes through the setup wizard first (only admins can run it).
-  if (!store.config.setupComplete && can('admin') && !['welcome', 'settings', 'gear'].includes(page)) {
+  if (!store.config.setupComplete && can('admin') && !['welcome', 'settings', 'gear'].includes(page) && !location.pathname.startsWith('/tv/')) {
     location.replace('/welcome');
     await new Promise(() => {});
   }
   applyTheme(store.config);
-  // ?kiosk=1 hides the header (TVs, confidence monitors); alerts stay visible.
-  if (new URLSearchParams(location.search).get('kiosk') === '1') document.body.classList.add('kiosk');
+  // ?kiosk=1 (and TV links, /tv/...) hide the header (TVs, confidence monitors); alerts stay visible.
+  if (new URLSearchParams(location.search).get('kiosk') === '1' || location.pathname.startsWith('/tv/')) document.body.classList.add('kiosk');
   renderHeader(page);
   connect();
   setInterval(tickClock, 1000);

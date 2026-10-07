@@ -67,6 +67,9 @@ a { color: inherit; }
 .slot { display: flex; align-items: center; gap: 8px; }
 .slot:empty { display: none; }
 body.kiosk .topbar { display: none; }
+.tv-wait { flex: 1; display: grid; place-items: center; text-align: center; padding: 6vh 6vw; color: var(--text-2); }
+.tv-wait h1 { font-size: clamp(28px, 5vw, 64px); color: var(--text); margin: 0 0 .4em; }
+.tv-wait p { font-size: clamp(16px, 2.2vw, 28px); max-width: 32em; margin: 0 auto; }
 .clock { font: 600 20px var(--mono); font-variant-numeric: tabular-nums; }
 .conn { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; }
 .conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--critical); }

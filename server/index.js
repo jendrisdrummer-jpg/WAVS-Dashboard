@@ -72,6 +72,7 @@ function publicConfig(req) {
     org: { name: s.org.name, serviceName: s.org.serviceName, theme: s.org.theme, logo: Boolean(orgs.logoFile(rt.orgId)) },
     orgId: rt.orgId,
     orgs: orgs.list(),
+    tvBase: tvBase(req),
     setupComplete: s.setupComplete,
     dataDir,
     alerts: s.alerts,
@@ -205,6 +206,17 @@ function shareBase(req) {
   if (localName.active) return `http://${localName.host}${localName.port80 ? '' : port}`;
   const ip = lanAddresses()[0]?.address;
   return ip ? `http://${ip}${port}` : `http://localhost${port}`;
+}
+
+/**
+ * Address for TV players (Fire TV / AbleSign, smart TVs): the number address, since many of
+ * them can't look up ".local" names. Set a DHCP reservation for this computer so it stays put.
+ */
+function tvBase(req) {
+  const ip = lanAddresses()[0]?.address;
+  if (!ip) return shareBase(req);
+  const port = localName.port80 || cfg.server.port === 80 ? '' : `:${cfg.server.port}`;
+  return `http://${ip}${port}`;
 }
 
 app.get('/api/users', need('admin'), (req, res) => {
@@ -488,7 +500,7 @@ app.get('/api/comms/qr.svg', wrap(async (req, res) => {
 // ---- pages & static files
 const pub = path.join(ROOT, 'public');
 const pages = {
-  '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html',
+  '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html', '/tv/:org/:dash': 'dashboard.html',
   '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/gear': 'gear.html', '/settings': 'settings.html',
   '/comms': 'comms.html', '/comms/control': 'comms-control.html', '/comms/engine': 'comms-engine.html',
   '/login': 'login.html', '/join/:code': 'login.html',

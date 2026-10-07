@@ -17,7 +17,20 @@ const live = new Map(); // widget id -> { def, widget, el, inst }
 
 // ---------------------------------------------------------------- choose a dashboard
 
+// A TV link (/tv/<organization>/<dashboard id>) always shows that one dashboard of that one
+// organization, and keeps working when the dashboard is renamed. It's what "Copy TV link" gives.
+const tv = location.pathname.match(/^\/tv\/([^/]+)\/([^/]+)/);
+const tvOrg = tv && decodeURIComponent(tv[1]);
+const tvDash = tv && decodeURIComponent(tv[2]);
+
+/** Full-screen note on a TV when its dashboard can't be shown right now. */
+function tvNotice(title, detail) {
+  live.clear();
+  document.querySelector('.db-main').innerHTML = `<div class="tv-wait"><div><h1>${esc(title)}</h1><p>${esc(detail)}</p></div></div>`;
+}
+
 function pickDashboard() {
+  if (tv) return store.dashboards.find((d) => d.id === tvDash) || null;
   const slug = location.pathname.startsWith('/d/') ? decodeURIComponent(location.pathname.slice(3)) : null;
   let saved = null;
   try { saved = localStorage.getItem('wavs-dashboard'); } catch { /* storage unavailable */ }
@@ -27,8 +40,10 @@ function pickDashboard() {
 }
 
 function go(d) {
-  try { localStorage.setItem('wavs-dashboard', d.id); } catch { /* ignore */ }
-  history.replaceState(null, '', `/d/${encodeURIComponent(d.slug)}${location.search}`);
+  if (!tv) {
+    try { localStorage.setItem('wavs-dashboard', d.id); } catch { /* ignore */ }
+    history.replaceState(null, '', `/d/${encodeURIComponent(d.slug)}${location.search}`);
+  }
   current = d;
   build();
   renderHeader();
@@ -306,10 +321,15 @@ function renderHeader() {
        <button class="btn small" id="cancel">Cancel</button>
        <button class="btn small primary" id="save">Save</button>`
     : `<button class="btn small" id="edit" title="Add, move and resize widgets">✎ Edit</button>
+       <button class="btn small" id="tvlink" title="Copy a link for a TV or sign player (e.g. AbleSign on a Fire TV) that always shows this dashboard">📺 TV link</button>
        <button class="btn small" id="kiosk" title="Full screen without the header (for TVs)">⛶</button>`;
   slot.querySelector('#dash-pick').onchange = (e) => go(store.dashboards.find((d) => d.id === e.target.value));
   const on = (id, fn) => { const el = slotRight.querySelector(`#${id}`); if (el) el.onclick = fn; };
   on('edit', () => setEditing(true));
+  on('tvlink', async () => {
+    const url = `${store.config.tvBase}/tv/${encodeURIComponent(store.config.orgId)}/${encodeURIComponent(current.id)}`;
+    try { await navigator.clipboard.writeText(url); toast(`TV link for “${current.name}” copied. Paste it into AbleSign (or the TV's browser).`); } catch { prompt(`TV link for “${current.name}”`, url); }
+  });
   on('kiosk', () => { const u = new URL(location.href); u.searchParams.set('kiosk', '1'); location.href = u; });
   on('save', save);
   on('cancel', () => { setEditing(false); current = store.dashboards.find((d) => d.id === current.id) || current; build(); });
@@ -354,7 +374,10 @@ onRender(() => {
   // Someone else saved this dashboard: show their version (unless we're mid-edit).
   if (!editing && current) {
     const fresh = store.dashboards.find((d) => d.id === current.id);
-    if (!fresh) { go(store.dashboards[0]); return; }
+    if (!fresh) {
+      if (tv) { current = null; tvNotice('This dashboard was deleted', 'Copy a new TV link from the dashboard you want on this screen.'); return; }
+      go(store.dashboards[0]); return;
+    }
     if (JSON.stringify(fresh) !== builtFrom) { current = fresh; build(); renderHeader(); }
   }
   for (const w of live.values()) w.inst?.update?.();
@@ -362,6 +385,13 @@ onRender(() => {
 onMeters(() => { for (const w of live.values()) w.inst?.meters?.(); });
 setInterval(() => { for (const w of live.values()) w.inst?.update?.(); }, 1000);
 
-go(pickDashboard());
+if (tv && store.config.orgId !== tvOrg) {
+  // Locked to another organization: wait (the page reloads by itself when the host switches back).
+  const name = store.config.orgs.find((o) => o.id === tvOrg)?.name;
+  if (name) tvNotice(`Waiting for ${name}`, `The dashboard computer is showing ${store.config.org.name} right now. This screen comes back by itself when it switches to ${name}.`);
+  else tvNotice('This organization was removed', 'Copy a new TV link from the dashboard you want on this screen.');
+} else if (tv && !pickDashboard()) {
+  tvNotice('This dashboard was deleted', 'Copy a new TV link from the dashboard you want on this screen.');
+} else go(pickDashboard());
 // From Home → "New dashboard"
 if (new URLSearchParams(location.search).has('new')) createDashboard('New dashboard');

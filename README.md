@@ -87,6 +87,21 @@ Choosing a Shure model fills in the right number of channels.
 Add `?kiosk=1` to any URL to hide the header on TVs and confidence monitors. The ⛶ button does
 the same.
 
+### TVs and sign players (Fire TV + AbleSign, smart TVs)
+
+On a dashboard, click **📺 TV link** to copy a link for a screen, e.g.
+`http://192.168.1.50:8080/tv/grace-church/9520…`. Paste it into AbleSign as a web page (or open it
+in the TV's browser). A TV link:
+
+- shows that one dashboard full screen, with no header;
+- keeps working when the dashboard is renamed;
+- is locked to its organization. If the dashboard computer is switched to another organization,
+  the screen says "Waiting for …" and comes back by itself when it switches back.
+
+It uses the computer's number address, because Fire TV and many TVs can't look up `.local` names.
+Give the dashboard computer a fixed address (a DHCP reservation in your router) so TV links keep
+working after restarts. Leave "require sign-in" off for TVs on your own network.
+
 ## Building dashboards
 
 Four starter dashboards are created on first run: **Service Producer**, **Video Director**,
