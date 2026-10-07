@@ -1,5 +1,5 @@
 // Comms control: for the producer (admin PIN) or a lead (signed in on comms as a lead).
-import { start, esc, setHTML, toast } from './common.js';
+import { start, esc, setHTML, toast, api } from './common.js';
 
 await start({ page: 'comms' });
 
@@ -37,18 +37,72 @@ const send = (msg) => ws?.readyState === 1 && ws.send(JSON.stringify(msg));
 
 // ---------------------------------------------------------------- join QR
 
-const info = await (await fetch('/api/comms/info')).json();
-const urls = location.protocol === 'https:' ? [`${location.origin}/comms`, ...info.joinUrls.filter((u) => !u.startsWith(location.origin))] : info.joinUrls;
-let urlIdx = 0;
-function renderJoin() {
-  const url = urls[urlIdx] || `https://localhost:${info.httpsPort}/comms`;
-  setHTML($('join'), `<img class="cc-qr" src="/api/comms/qr.svg?url=${encodeURIComponent(url)}" alt="QR code to join comms">
-    <div><a class="mono cc-url" href="${esc(url)}" target="_blank">${esc(url)}</a>
-    ${urls.length > 1 ? `<button class="btn small" id="next-url" type="button">Other network (${urlIdx + 1}/${urls.length})</button>` : ''}
-    <p class="muted small">Phones must be on the same Wi-Fi. The first time, the phone warns the connection isn't private: tap <b>Show details → visit this website</b> (iPhone) or <b>Advanced → Proceed</b> (Android).</p></div>`);
-  const nb = $('next-url');
-  if (nb) nb.onclick = () => { urlIdx = (urlIdx + 1) % urls.length; renderJoin(); };
+let info = await (await fetch('/api/comms/info')).json();
+let tab = null; // 'anywhere' | 'wifi'
+let lanIdx = 0;
+async function refreshInfo() {
+  try { info = await (await fetch('/api/comms/info')).json(); } catch { return; }
+  renderJoin();
 }
+setInterval(refreshInfo, 3000);
+
+function renderJoin() {
+  const rm = info.remote || {};
+  const anywhere = rm.status === 'on' && rm.url;
+  if (!tab || (tab === 'anywhere' && !anywhere)) tab = anywhere ? 'anywhere' : 'wifi';
+  const lan = info.lan || [];
+  const here = location.protocol === 'https:' && !/localhost|127\.0\.0\.1/.test(location.hostname) ? `${location.origin}/comms` : null;
+  const lanUrl = here || lan[lanIdx]?.url || `https://localhost:${info.httpsPort}/comms`;
+  const url = tab === 'anywhere' ? rm.url : lanUrl;
+  const open = state && !state.access.rosterOnly && !state.access.hasTeamPassword;
+  const statusText = {
+    off: 'Off. Phones must be on the same Wi-Fi as this computer.',
+    installing: 'Downloading the Cloudflare connector (first time only)…',
+    starting: 'Starting…',
+    on: 'On. Phones can join from any network: Wi-Fi, hotspot or cellular.',
+    error: `Not working: ${esc(rm.error || 'unknown error')}. Retrying…`,
+  }[rm.status] || '';
+  setHTML($('join'), `
+    <div class="cc-tabs" role="tablist">
+      <button role="tab" class="${tab === 'anywhere' ? 'on' : ''}" data-tab="anywhere" ${anywhere ? '' : 'disabled'}>Anywhere${anywhere ? '' : ' (off)'}</button>
+      <button role="tab" class="${tab === 'wifi' ? 'on' : ''}" data-tab="wifi">Same Wi-Fi</button>
+    </div>
+    <div class="cc-joinrow">
+      <img class="cc-qr" src="/api/comms/qr.svg?url=${encodeURIComponent(url)}" alt="QR code to join comms">
+      <div>
+        <a class="mono cc-url" href="${esc(url)}" target="_blank">${esc(url)}</a>
+        ${tab === 'wifi' && !here && lan.length > 1 ? `<label class="f small"><span>This computer's address</span><select id="lan-pick">${lan.map((l, i) => `<option value="${i}" ${i === lanIdx ? 'selected' : ''}>${esc(l.label)}${l.likely ? ' ✓' : ''}</option>`).join('')}</select></label>` : ''}
+        <p class="muted small">${tab === 'anywhere'
+          ? 'Works on any network, no warnings. Audio may lag slightly more on cellular.'
+          : 'Phone must be on the same Wi-Fi. The first time, it warns the connection isn\'t private: tap <b>Show Details → visit this website</b> (iPhone) or <b>Advanced → Proceed</b> (Android).'}</p>
+      </div>
+    </div>
+    <div class="cc-offsite">
+      <div><b>Off-site access</b> <span class="chip ${rm.status === 'on' ? 'good' : rm.status === 'error' ? 'bad' : ''}">${rm.enabled ? (rm.status === 'on' ? 'On' : rm.status === 'error' ? 'Problem' : 'Starting') : 'Off'}</span>
+        <button class="btn small ${rm.enabled ? '' : 'primary'}" id="offsite-toggle" type="button">${rm.enabled ? 'Turn off' : 'Turn on'}</button></div>
+      <small class="muted">${statusText}</small>
+      ${rm.enabled && open ? '<small class="warn-text">⚠ Anyone with the link can join. Set a team password or turn on "Only people on the list" under Sign-in rules.</small>' : ''}
+    </div>
+    <details class="cc-help"><summary>Phone can't open it?</summary><ol class="small">
+      <li>Easiest fix: turn on <b>Off-site access</b> and use the <b>Anywhere</b> code. It works even when the Wi-Fi blocks devices from reaching each other.</li>
+      <li>Same Wi-Fi: make sure the phone isn't on a <b>guest</b> network or cellular. Guest Wi-Fi usually blocks devices from reaching each other.</li>
+      <li>Try the other addresses in the list above (the one marked ✓ is the most likely).</li>
+      <li>On this Mac: System Settings → Network → <b>Firewall</b> → Options → allow <b>node</b> to accept incoming connections.</li>
+      <li>Test: on the phone, open <span class="mono">${esc(info.httpUrl || 'http://<this computer>:8080')}</span>. If that doesn't load either, the network or firewall is blocking it.</li>
+    </ol></details>`);
+}
+$('join').addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-tab]');
+  if (t && !t.disabled) { tab = t.dataset.tab; renderJoin(); }
+  if (e.target.id === 'offsite-toggle') {
+    const on = !info.remote?.enabled;
+    if (on && !confirm('Turn on off-site access?\n\nPhones on any network (hotspot, cellular) can then join comms through a secure Cloudflare link. Only the comms page is reachable through it, not the dashboard or settings.')) return;
+    try { await api('POST', '/api/comms/remote', { on }); } catch (err) { return toast(err.message, true); }
+    if (on) tab = 'anywhere';
+    refreshInfo();
+  }
+});
+$('join').addEventListener('change', (e) => { if (e.target.id === 'lan-pick') { lanIdx = Number(e.target.value); renderJoin(); } });
 renderJoin();
 
 // ---------------------------------------------------------------- render
@@ -66,6 +120,7 @@ function render() {
     : `<div class="eng-status g-bad"><span class="dev-dot"></span><b>Not running</b></div>
        <p class="muted small">Nobody can hear anyone until the engine runs. Open it <b>on the dashboard computer</b> and click Start.</p>
        <a class="btn primary" href="/comms/engine" target="_blank">Open comms engine</a>`);
+  renderJoin();
   renderCues();
   renderPeople();
   renderAccess();
@@ -119,7 +174,7 @@ function renderPeople() {
     return `<tr data-id="${esc(m.id)}" class="${talkingNow.length ? 'talking' : ''}">
       <td><span class="cc-dot ${st}" title="${stText}"></span></td>
       <td class="cc-name"><b>${esc(m.name)}</b>${m.lead ? ' <span class="chip on">Lead</span>' : ''}${m.muted ? ' <span class="chip bad">Muted</span>' : ''}
-        <small class="muted">${stText}${m.hasCode ? ' · has code' : ''}</small>
+        <small class="muted">${stText}${m.offsite ? ' · off-site' : ''}${m.relay ? ' · audio via internet' : ''}${m.hasCode ? ' · has code' : ''}</small>
         <span class="lvl"><i data-lvl="m:${esc(m.id)}"></i></span></td>
       <td><select data-act="position" aria-label="Position">${state.positions.map((p) => `<option value="${esc(p.id)}" ${p.id === m.position ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></td>
       ${chs.map((c) => {

@@ -15,6 +15,12 @@ let state = null;
 let engineOnline = false;
 let mic = null; // MediaStream
 let pc = null;
+let actx = null; // AudioContext for the relay
+let relay = null; // { cap, player } when audio goes through the dashboard instead of directly
+let mode = new URLSearchParams(location.search).has('relay') ? 'relay' : 'direct';
+let fallbackTimer;
+// Public STUN lets a phone on another network find a direct path; if none works we use the relay.
+const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
 let started = false;
 const talking = new Set(); // channel ids I'm talking on
 let latchMode = localStorage.getItem('wavs-comms-latch') || 'auto'; // auto: tap = latch, hold = momentary
@@ -23,13 +29,17 @@ let latchMode = localStorage.getItem('wavs-comms-latch') || 'auto'; // auto: tap
 
 function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws`);
+  ws.binaryType = 'arraybuffer';
   ws.onopen = () => send({ t: 'hello', role: 'member', token: localStorage.getItem(TOKEN) });
   ws.onclose = () => {
     setStatus();
     closePeer();
     setTimeout(connect, 1500);
   };
-  ws.onmessage = (ev) => onMessage(JSON.parse(ev.data));
+  ws.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) { relay?.player.port.postMessage(ev.data, [ev.data]); return; }
+    onMessage(JSON.parse(ev.data));
+  };
 }
 const send = (msg) => ws?.readyState === 1 && ws.send(JSON.stringify(msg));
 
@@ -42,7 +52,7 @@ function onMessage(msg) {
       state = msg.state;
       engineOnline = state.engine.online;
       if (!started) { $('start-name').textContent = me.name; $('start-pos').textContent = positionName(me.position); show('start'); }
-      else { resendTalk(); startPeer(); }
+      else { resendTalk(); startAudio(); }
       return render();
     case 'state':
       state = msg.state;
@@ -53,7 +63,7 @@ function onMessage(msg) {
       return render();
     case 'engine':
       engineOnline = msg.online;
-      if (msg.online && started) startPeer();
+      if (msg.online && started) startAudio();
       if (!msg.online) closePeer();
       return render();
     case 'signal': return onSignal(msg.data);
@@ -106,12 +116,16 @@ $('start-btn').onclick = async () => {
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('This page must be opened with https:// to use the microphone.');
     mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    // Created on the tap so the browser allows sound; used if audio has to go through the dashboard.
+    actx = new AudioContext();
+    await actx.resume();
+    await actx.audioWorklet.addModule('/js/comms-worklet.js');
     started = true;
     $('out').play().catch(() => {});
     updateMicGate();
     keepAwake();
     show('main');
-    startPeer();
+    startAudio();
     render();
   } catch (e) {
     $('start-err').textContent = e.name === 'NotAllowedError'
@@ -121,20 +135,45 @@ $('start-btn').onclick = async () => {
 };
 
 function closePeer() {
+  clearTimeout(fallbackTimer);
   if (pc) { pc.onconnectionstatechange = null; pc.close(); pc = null; }
+  if (relay) { relay.cap.disconnect(); relay.player.disconnect(); relay.src.disconnect(); relay = null; }
+  setStatus();
+}
+
+function startAudio() { return mode === 'relay' ? startRelay() : startPeer(); }
+
+/** Audio through the dashboard over the comms connection: works on any network, a little more delay. */
+function startRelay() {
+  closePeer();
+  mode = 'relay';
+  if (!started || !engineOnline || !mic) return setStatus();
+  const src = actx.createMediaStreamSource(mic);
+  const cap = new AudioWorkletNode(actx, 'wavs-capture', { processorOptions: { gated: true } });
+  cap.port.onmessage = (e) => { if (ws?.readyState === 1 && ws.bufferedAmount < 64000) ws.send(e.data); };
+  const mute = actx.createGain();
+  mute.gain.value = 0;
+  src.connect(cap).connect(mute).connect(actx.destination); // keeps the capture running
+  const player = new AudioWorkletNode(actx, 'wavs-player');
+  player.connect(actx.destination);
+  relay = { src, cap, player };
+  updateMicGate();
+  send({ t: 'relay' });
   setStatus();
 }
 
 async function startPeer() {
   closePeer();
   if (!started || !engineOnline || !mic) return setStatus();
-  pc = new RTCPeerConnection({ iceServers: [] }); // same network: no STUN/TURN needed
+  pc = new RTCPeerConnection({ iceServers: ICE });
+  // No direct audio path within a few seconds (hotspot, cellular, isolated guest Wi-Fi)? Use the relay.
+  fallbackTimer = setTimeout(() => { if (pc && pc.connectionState !== 'connected') startRelay(); }, 7000);
   for (const track of mic.getAudioTracks()) pc.addTrack(track, mic);
   pc.ontrack = (ev) => { $('out').srcObject = ev.streams[0] || new MediaStream([ev.track]); $('out').play().catch(() => {}); };
   pc.onicecandidate = (ev) => ev.candidate && send({ t: 'signal', data: { candidate: ev.candidate.toJSON() } });
   pc.onconnectionstatechange = () => {
     setStatus();
-    if (pc?.connectionState === 'failed') setTimeout(startPeer, 1000);
+    if (pc?.connectionState === 'failed') startRelay();
   };
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
@@ -152,13 +191,17 @@ async function onSignal(data) {
 
 /** The mic only sends while I'm talking on something. */
 function updateMicGate() {
-  if (mic) for (const t of mic.getAudioTracks()) t.enabled = talking.size > 0 && !me?.muted;
+  const on = talking.size > 0 && !me?.muted;
+  if (mic) for (const t of mic.getAudioTracks()) t.enabled = on;
+  relay?.cap.port.postMessage({ on });
 }
 
 function stopAll() {
   started = false;
   closePeer();
   mic?.getTracks().forEach((t) => t.stop());
+  actx?.close();
+  actx = null;
   mic = null;
   talking.clear();
 }
@@ -252,8 +295,9 @@ function setStatus() {
   if (ws?.readyState !== 1) text = 'Reconnecting…';
   else if (!engineOnline) { text = 'Comms engine offline'; cls = 'bad'; }
   else if (me?.muted) { text = 'Muted by producer'; cls = 'bad'; }
+  else if (relay) { text = 'Connected · via internet'; cls = 'ok'; }
   else if (pc?.connectionState === 'connected') { text = 'Connected'; cls = 'ok'; }
-  else if (pc?.connectionState === 'failed') { text = 'Audio failed, retrying'; cls = 'bad'; }
+  else if (pc) { text = 'Connecting audio…'; }
   el.textContent = text;
   el.className = `cx-status ${cls}`;
 }

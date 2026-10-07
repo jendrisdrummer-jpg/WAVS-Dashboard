@@ -8,8 +8,8 @@ import { matrix } from '../public/js/comms-routing.js';
 
 // A fake WebSocket that records what the server sends it.
 function socket(local = false) {
-  const ws = { readyState: 1, sent: [], handlers: {}, closed: false, isLocal: local };
-  ws.send = (raw) => ws.sent.push(JSON.parse(raw));
+  const ws = { readyState: 1, sent: [], binary: [], handlers: {}, closed: false, isLocal: local };
+  ws.send = (raw, opts) => (opts?.binary ? ws.binary.push(Buffer.from(raw)) : ws.sent.push(JSON.parse(raw)));
   ws.on = (ev, fn) => { ws.handlers[ev] = fn; };
   ws.close = () => { ws.closed = true; ws.handlers.close?.(); };
   ws.last = (t) => [...ws.sent].reverse().find((m) => m.t === t);
@@ -19,10 +19,11 @@ function socket(local = false) {
 function setup({ pin = '1234' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comms-'));
   const comms = new Comms(dir, { checkPin: (p) => p === pin, orgName: 'Grace Church' });
-  const connect = (local = false) => {
+  const connect = (local = false, { offsite = false, ip = '203.0.113.9' } = {}) => {
     const ws = socket(local);
-    comms.attach(ws, { socket: { remoteAddress: local ? '127.0.0.1' : '192.168.1.50' } });
-    ws.msg = (m) => ws.handlers.message(JSON.stringify(m));
+    comms.attach(ws, { socket: { remoteAddress: local || offsite ? '127.0.0.1' : '192.168.1.50' }, viaTunnel: offsite, headers: { 'cf-connecting-ip': ip } });
+    ws.msg = (m) => ws.handlers.message(JSON.stringify(m), false);
+    ws.bin = (buf) => ws.handlers.message(buf, true);
     return ws;
   };
   const producer = connect();
@@ -153,4 +154,49 @@ test('talk is only allowed on channels with talk permission', () => {
   assert.deepEqual(env.comms.talking[id], { cams: true });
   env.producer.msg({ t: 'mute', memberId: id, on: true });
   assert.deepEqual(env.comms.talking[id], undefined);
+});
+
+test('off-site: phones can join, but nobody can be the engine or control through the tunnel', () => {
+  const env = setup({ pin: '' });
+  const eng = env.connect(false, { offsite: true });
+  eng.msg({ t: 'hello', role: 'engine' });
+  assert.match(eng.last('error').error, /off-site/);
+  assert.equal(env.comms.engine, null);
+  const ctl = env.connect(false, { offsite: true });
+  ctl.msg({ t: 'hello', role: 'control', pin: '' });
+  assert.match(ctl.last('error').error, /off-site/);
+  const ws = env.connect(false, { offsite: true });
+  ws.msg({ t: 'hello', role: 'member' });
+  ws.msg({ t: 'join', name: 'Remote Rita' });
+  assert.ok(ws.last('welcome'));
+  assert.equal(env.comms.state().members[0].offsite, true);
+});
+
+test('relay: audio frames go phone -> engine (tagged with who) and engine -> that phone only', () => {
+  const env = setup();
+  const eng = env.connect(true);
+  eng.msg({ t: 'hello', role: 'engine' });
+  const a = phone(env, 'Ann');
+  const b = phone(env, 'Bob');
+  const annId = a.last('welcome').member.id;
+  a.msg({ t: 'relay' });
+  assert.equal(eng.last('relay').from, annId);
+  a.bin(Buffer.alloc(320, 7));
+  assert.equal(eng.binary.length, 1);
+  assert.equal(eng.binary[0].subarray(0, 8).toString(), annId);
+  assert.equal(eng.binary[0].length, 328);
+  eng.bin(Buffer.concat([Buffer.from(annId), Buffer.alloc(320, 9)]));
+  assert.equal(a.binary.length, 1);
+  assert.equal(a.binary[0][0], 9);
+  assert.equal(b.binary.length, 0, 'other phones get nothing');
+  b.bin(Buffer.alloc(9000)); // oversized frames are dropped
+  assert.equal(eng.binary.length, 1);
+});
+
+test('sign-in: too many wrong codes from one address are refused for a while', () => {
+  const env = setup();
+  env.producer.msg({ t: 'add', name: 'Pat', position: 'director', code: 'right' });
+  for (let i = 0; i < 8; i++) phone(env, 'Pat', { code: `wrong${i}` });
+  const ws = phone(env, 'Pat', { code: 'right' });
+  assert.match(ws.last('error').error, /Too many wrong tries/);
 });

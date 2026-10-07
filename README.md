@@ -260,15 +260,24 @@ With both off, anyone on the network can join and pick a position.
 
 ### Setting it up
 1. On the dashboard computer, open **`http://localhost:8080/comms/engine`** in Chrome and click **Start**. Leave the tab open; closing it stops comms. Allow the microphone when asked: that lets phones connect directly, and nothing is recorded.
-2. Phones must be on the **same Wi-Fi/network** as the dashboard computer. They join by scanning the QR code on the Comms page (`https://<computer-ip>:8443/comms`).
-3. Phones only allow the microphone on `https://` pages, so the dashboard runs a second, encrypted port (**8443**) with its own certificate (stored in `data/tls/`). The first time, each phone warns that the connection isn't private:
-   - iPhone: tap **Show Details → visit this website**.
-   - Android: tap **Advanced → Proceed**.
+2. Phones join by scanning the QR code on the Comms page. There are two kinds of link:
+   - **Same Wi-Fi** (`https://<computer-ip>:8443/comms`): the phone must be on the same network as the dashboard computer. Phones only allow the microphone on `https://` pages, so the dashboard runs a second, encrypted port (**8443**) with its own certificate (stored in `data/tls/`). The first time, each phone warns that the connection isn't private:
+     - iPhone: tap **Show Details → visit this website**.
+     - Android: tap **Advanced → Proceed**.
 
-   To skip that warning, use a trusted certificate, for example through Tailscale HTTPS. Change the port with `HTTPS_PORT=...` (`HTTPS_PORT=0` turns it off).
-4. Use headphones. Each phone keeps its screen awake while comms is open.
+     Change the port with `HTTPS_PORT=...` (`HTTPS_PORT=0` turns it off).
+   - **Anywhere** (turn on **Off-site access** on the Comms page): a secure link like `https://<random>.trycloudflare.com/comms` that works on any network (Wi-Fi, a personal hotspot, cellular) with no certificate warning. It uses a free Cloudflare quick tunnel and needs no account. The first time, the dashboard downloads Cloudflare's `cloudflared` program into `data/bin/`; if you already installed it with Homebrew, that copy is used. The link changes each time the dashboard restarts, and the QR code updates with it. Only the comms phone page is reachable through this link: the dashboard, settings and the comms control page are not. Set a **team password** or **Only people on the list** when using it.
+3. Use headphones. Each phone keeps its screen awake while comms is open.
 
-This is built for **15–20 people** on one computer. Audio goes directly from each phone to the comms engine on your network, not through the internet.
+**How the audio travels.** A phone first tries to connect its audio directly to the comms engine, which is quickest. If that doesn't work within a few seconds (a hotspot, cellular, or guest Wi-Fi that keeps devices apart), it automatically sends its audio through the dashboard instead. The phone then shows **Connected · via internet**, and the Comms page shows *audio via internet*. That uses about 128 kbit/s each way, and only while someone is talking.
+
+**Phone can't open the link?** The Comms page has a checklist under *Phone can't open it?*:
+- Turning on **Off-site access** fixes most cases.
+- On the same Wi-Fi, guest networks often block devices from reaching each other.
+- The Mac's firewall must allow **node** to accept incoming connections.
+- If the computer has several network addresses, try each one in the list. The one marked ✓ is the most likely.
+
+This is built for **15–20 people** on one computer. On the same Wi-Fi, audio goes directly from each phone to the comms engine without going through the internet.
 
 ### Behringer WING (or any audio interface)
 Connect the WING to the dashboard computer over USB. On the comms engine page, under **Audio interface**:
