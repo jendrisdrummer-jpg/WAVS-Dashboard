@@ -1,5 +1,5 @@
 // Views shared by the standalone pages and the dashboard widgets.
-import { store, esc, micView, battery, meterRows, photoUrl, initials, STATUS_LABEL, KIND_ICON } from './common.js';
+import { store, esc, micView, battery, meterRows, photoUrl, faceAttr, initials, STATUS_LABEL, KIND_ICON } from './common.js';
 
 /** Pairs of active carriers closer together than the configured spacing. */
 export function spacingConflicts(list) {
@@ -75,7 +75,7 @@ export function greenroomCard(slot, { handoff = false } = {}) {
   const status = a?.status;
   const cls = ['gcard', status ? `status-${status}` : 'unassigned', alerting ? 'alerting' : ''].join(' ');
   return `<article class="${cls}">
-    <div class="photo" style="${url ? `background-image:url('${url}')` : ''}">
+    <div class="photo"${url ? faceAttr(person) : ''} style="${url ? `background-image:url('${url}')` : ''}">
       ${url ? '' : esc(person ? initials(person.name) : KIND_ICON[slot.kind] || '🎤')}
       <span class="miclabel">${KIND_ICON[slot.kind] || ''} ${esc(slot.label)}</span>
       ${status ? `<span class="status-pill ${status}">${STATUS_LABEL[status]}</span>` : ''}

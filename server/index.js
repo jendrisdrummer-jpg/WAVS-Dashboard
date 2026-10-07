@@ -381,6 +381,9 @@ app.put('/api/people/:id', need('producer'), upload.single('photo'), wrap((req, 
   else if (req.body.removePhoto === 'true') fields.photo = null;
   res.json(rt.store.updatePerson(req.params.id, fields));
 }));
+app.put('/api/people/:id/face', need('producer'), wrap((req, res) => {
+  res.json(rt.store.setFace(req.params.id, { photo: req.body?.photo, face: req.body?.face, manual: Boolean(req.body?.manual) }));
+}));
 app.delete('/api/people/:id', need('producer'), wrap((req, res) => { rt.store.removePerson(req.params.id); res.json({ ok: true }); }));
 
 app.put('/api/assignments/:micId', need('crew'), wrap((req, res) => {
@@ -510,6 +513,14 @@ app.get('/uploads/:file', (req, res) => res.sendFile(path.join(rt.store.uploads,
 app.get('/logo', (_req, res) => {
   const f = orgs.logoFile(rt.orgId);
   return f ? res.sendFile(path.join(orgs.dir(rt.orgId), f), { maxAge: 0 }) : res.status(404).end();
+});
+// Face finding for photo crops (runs in the browser; the models are bundled, so no internet needed).
+const faceApi = path.join(ROOT, 'node_modules/@vladmandic/face-api');
+app.get('/vendor/face-api.esm.js', (_req, res) => res.sendFile(path.join(faceApi, 'dist/face-api.esm.js'), { maxAge: '7d' }));
+app.get('/vendor/face-models/:file', (req, res) => {
+  const f = path.basename(req.params.file);
+  if (!/^ssd_mobilenetv1_model/.test(f)) return res.status(404).end();
+  res.sendFile(path.join(faceApi, 'model', f), { maxAge: '7d' }, (e) => e && res.status(404).end());
 });
 app.get('/vendor/hls.min.js', (_req, res) => res.sendFile(path.join(ROOT, 'node_modules/hls.js/dist/hls.min.js')));
 app.get('/vendor/gridstack-all.js', (_req, res) => res.sendFile(path.join(ROOT, 'node_modules/gridstack/dist/gridstack-all.js')));

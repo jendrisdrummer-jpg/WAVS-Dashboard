@@ -992,3 +992,22 @@ body.as-lead .lead-only-hide { display: none !important; }
 .ppm-how.bad { color: var(--warning); }
 .ppm-hdr { margin: 10px 8px 4px; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 @media (max-width: 700px) { .ppm-head { display: none; } .ppm-row { grid-template-columns: 1fr; gap: 4px; } }
+
+/* Face position dialog (Setup → People → 🎯 Adjust) */
+.face-dlg { width: min(720px, calc(100vw - 32px)); }
+.face-edit { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+.face-src { position: relative; margin: 0 auto; touch-action: none; cursor: crosshair; user-select: none; }
+.face-src img { display: block; width: 100%; height: 100%; border-radius: 8px; pointer-events: none; }
+.face-ring { position: absolute; aspect-ratio: 1; transform: translate(-50%, -50%); border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0, 0, 0, .6), 0 0 0 9999px rgba(0, 0, 0, .25); pointer-events: none; }
+.face-previews { display: grid; gap: 10px; justify-items: center; text-align: center; }
+.face-previews small { color: var(--text-2); }
+.fp { background: var(--panel-2) center/cover no-repeat; border: 2px solid var(--line); }
+.fp-circle { width: 72px; height: 72px; border-radius: 50%; }
+.fp-square { width: 150px; height: 150px; border-radius: 8px; }
+.fp-tall { width: 90px; height: 190px; border-radius: 8px; }
+@media (max-width: 560px) {
+  .face-edit { grid-template-columns: 1fr; }
+  .face-previews { grid-template-columns: repeat(3, auto); align-items: end; }
+  .fp-square { width: 110px; height: 110px; }
+  .fp-tall { width: 64px; height: 140px; }
+}
