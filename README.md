@@ -213,7 +213,10 @@ to it.
 live service started: the service that was live before, everyone's mics and hand-off statuses,
 and the order of service with its progress. The undone service goes back to planned and won't
 go live by itself again; start it with Go live or Next service. "End service" marks the live one
-done, with nothing live until the next.
+done and clears its order of service, countdowns and mic assignments, so dashboards show "No
+service live · Next: …" until the next one goes live. If nothing is live but an order of service is
+still loaded (e.g. typed in before using the schedule), Home offers "Clear it". Undo brings back
+what End or Clear removed.
 
 Typed plan times never move the plan on by themselves: the current item changes when ProPresenter
 moves, Planning Center LIVE moves, or someone taps Next or an item. (The demo ProPresenter moves

@@ -13,7 +13,7 @@ import {
 } from './common.js';
 import { buildTile } from './video.js';
 import { spacingConflicts, drawSpectrum, rfRows } from './views.js';
-import { planTiming, currentInfo, serviceClock, planSource } from './plan.js';
+import { planTiming, currentInfo, serviceClock, planSource, noServiceText } from './plan.js';
 import { mountMicView, MIC_OPTIONS } from './micviews.js';
 
 const switcherChoices = () => [['', '— none —'], ...store.config.switchers.map((s) => [s.id, s.name])];
@@ -323,7 +323,7 @@ export const WIDGETS = {
       return {
         update() {
           const svc = store.service;
-          if (!svc.plan) return setHTML(body, empty(store.config.planningCenter ? 'Loading Planning Center…' : 'No service plan yet.<br><small>Add one on the <a href="/admin#plan">Setup</a> page (Planning Center or typed in).</small>'));
+          if (!svc.plan) return setHTML(body, empty(noServiceText(store.config.planningCenter && !svc.idle ? 'Loading Planning Center…' : 'No service plan yet.<br><small>Add one on the <a href="/admin#plan">Setup</a> page (Planning Center or typed in).</small>')));
           const timing = planTiming(svc);
           const cur = svc.current?.itemId;
           const rows = svc.plan.items.map((it) => {
@@ -376,7 +376,7 @@ export const WIDGETS = {
       return {
         update() {
           const svc = store.service;
-          if (!svc.plan) return setHTML(body, empty('No service plan yet'));
+          if (!svc.plan) return setHTML(body, empty(noServiceText('No service plan yet')));
           const timing = planTiming(svc);
           const all = svc.plan.items;
           const playable = all.filter((i) => i.type !== 'header');
@@ -430,7 +430,7 @@ export const WIDGETS = {
       return {
         update() {
           const info = currentInfo(store.service);
-          if (!info) return setHTML(body, empty(store.service.plan ? 'Service not started.<br><small>Pick an item in the plan, advance ProPresenter, or start Services LIVE.</small>' : 'No service plan'));
+          if (!info) return setHTML(body, empty(store.service.plan ? 'Service not started.<br><small>Pick an item in the plan, advance ProPresenter, or start Services LIVE.</small>' : noServiceText('No service plan')));
           const pct = info.item.length ? Math.min(100, (info.elapsed / info.item.length) * 100) : 0;
           setHTML(body, `<div class="ci ${info.item.length && info.remaining < 0 ? 'overrun' : info.remaining < 30 && info.item.length ? 'soon' : ''}">
             <div class="ci-title">${esc(info.item.title)}${info.item.key ? ` <span class="chip">${esc(info.item.key)}</span>` : ''}</div>
@@ -453,7 +453,7 @@ export const WIDGETS = {
       return {
         update() {
           const c = serviceClock(store.service);
-          setHTML(body, c ? `<div class="big-stat ${c.tone}"><small>${esc(c.label)}</small><b class="mono">${fmtDuration(c.seconds)}</b>${c.sub ? `<span class="muted small">${esc(c.sub)}</span>` : ''}</div>` : empty('No service times'));
+          setHTML(body, c ? `<div class="big-stat ${c.tone}"><small>${esc(c.label)}</small><b class="mono">${fmtDuration(c.seconds)}</b>${c.sub ? `<span class="muted small">${esc(c.sub)}</span>` : ''}</div>` : empty(store.service.plan ? 'No service times' : noServiceText('No service times')));
         },
       };
     },

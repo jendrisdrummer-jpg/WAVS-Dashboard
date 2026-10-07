@@ -1,4 +1,17 @@
 // Service plan timing maths, shared by the plan / current item / service clock widgets.
+import { store, esc } from './common.js';
+import { fmtWhen } from './schedulekit.js';
+
+/**
+ * What service widgets show without an order of service. With the Schedule in use that means
+ * nothing is live: say so, and what's next.
+ */
+export function noServiceText(fallback = 'No service plan') {
+  const sc = store.schedule;
+  if (!sc?.services?.length) return fallback;
+  const next = sc.services.find((x) => x.id === sc.nextId);
+  return `No service live${next ? `<br><small>Next: ${esc(next.name)} · ${fmtWhen(next.start)}</small>` : ''}`;
+}
 
 const playable = (svc) => (svc.plan?.items || []).filter((i) => i.type !== 'header');
 const hhmm = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });

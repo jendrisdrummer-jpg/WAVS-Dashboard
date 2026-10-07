@@ -163,6 +163,30 @@ export class Runtime extends EventEmitter {
     if (before !== this.schedule.switchAt) this.emit('message', { type: 'schedule', schedule: this.schedule.view() });
   }
 
+  /** How the green room and plan are now (for Undo). */
+  snapshot4undo() {
+    return {
+      greenroom: structuredClone({ service: this.store.data.service, assignments: this.store.data.assignments }),
+      plan: structuredClone(this.service.saved),
+    };
+  }
+
+  /**
+   * Nothing live: no order of service (so no countdowns), no service name, no mic assignments.
+   * end: also mark the live service done ("End service"); either way it can be undone.
+   */
+  clearLive({ end = true } = {}) {
+    const undo = this.snapshot4undo();
+    if (end) this.schedule.endLive({ undo });
+    else this.schedule.data.undo = { ...undo, serviceId: null, cleared: true };
+    this.store.data.service = { ...this.store.data.service, name: null, notes: '' };
+    this.store.data.assignments = {};
+    this.store.save();
+    if (this.settings.control?.pushNamesToReceivers) for (const m of this.micSlots) this.pushName(m.id);
+    this.service.clear();
+    this.schedule.save();
+  }
+
   /** Undo going live: the previous service, everyone's mics (and statuses) and the plan come back. */
   undoLive() {
     const u = this.schedule.undoLive();
@@ -189,10 +213,7 @@ export class Runtime extends EventEmitter {
    */
   goLive(id, by = 'manual', { reloadPlan = true } = {}) {
     // How things are now, so "Undo" can put them back (not for edits to the live service).
-    const undo = by === 'edit' ? null : {
-      greenroom: structuredClone({ service: this.store.data.service, assignments: this.store.data.assignments }),
-      plan: structuredClone(this.service.saved),
-    };
+    const undo = by === 'edit' ? null : this.snapshot4undo();
     const svc = this.schedule.setLive(id, { undo });
     const slots = new Set(this.micSlots.map((m) => m.id));
     const now = new Date().toISOString();

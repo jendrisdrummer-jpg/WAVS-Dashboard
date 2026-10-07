@@ -41,7 +41,7 @@ export class ServiceManager extends EventEmitter {
       await this.refreshUpcoming();
       if (this.stopped) return; // organization switched while Planning Center was loading
       // Nothing chosen yet: follow the next Planning Center plan automatically.
-      if (!this.saved.source && this.upcoming[0]) await this.selectPco(this.upcoming[0].serviceTypeId, this.upcoming[0].id, { keepProgress: true });
+      if (!this.saved.source && !this.saved.idle && this.upcoming[0]) await this.selectPco(this.upcoming[0].serviceTypeId, this.upcoming[0].id, { keepProgress: true });
       else if (this.saved.source === 'pco') await this.reloadPco();
       if (this.stopped) return;
       this.liveTimer = setInterval(() => this.pollLive(), this.cfg.livePollMs);
@@ -77,7 +77,19 @@ export class ServiceManager extends EventEmitter {
       links: this.saved.links?.[this.planKey()] || {},
       remembered: Object.keys(this.saved.aliases || {}).length,
       playlist: { expected: this.saved.expectPlaylist || '', active: this.activePlaylist || null },
+      idle: Boolean(this.saved.idle),
     };
+  }
+
+  /**
+   * No order of service: nothing is live (the schedule ended it). Stays empty after a restart too,
+   * rather than picking the next Planning Center plan by itself.
+   */
+  clear() {
+    this.saved = { ...this.saved, source: null, serviceTypeId: null, planId: null, manual: null, current: null, actuals: {}, expectPlaylist: '', idle: true };
+    this.plan = null;
+    this.save();
+    this.emitState();
   }
 
   /** Put the plan back exactly as it was (Undo on the schedule): source, items, progress. */
@@ -213,7 +225,7 @@ export class ServiceManager extends EventEmitter {
   async selectPco(serviceTypeId, planId, { keepProgress = false } = {}) {
     if (!this.pco) throw new Error('Planning Center is not configured');
     const same = this.saved.source === 'pco' && this.saved.planId === planId;
-    this.saved = { ...this.saved, source: 'pco', serviceTypeId, planId };
+    this.saved = { ...this.saved, source: 'pco', serviceTypeId, planId, idle: false };
     if (!same && !keepProgress) this.saved = { ...this.saved, current: null, actuals: {} };
     this.save();
     await this.reloadPco();
@@ -228,6 +240,7 @@ export class ServiceManager extends EventEmitter {
     const m = String(start || '').match(/^(\d{1,2}):(\d{2})$/);
     this.saved = {
       ...this.saved,
+      idle: false,
       source: 'manual',
       serviceTypeId: null,
       planId: null,
@@ -309,7 +322,7 @@ export class ServiceManager extends EventEmitter {
 
   /** Use ProPresenter's active playlist as the order of service. */
   useProPresenter() {
-    this.saved = { ...this.saved, source: 'propresenter', serviceTypeId: null, planId: null, current: null, actuals: {} };
+    this.saved = { ...this.saved, source: 'propresenter', serviceTypeId: null, planId: null, current: null, actuals: {}, idle: false };
     this.plan = null;
     this.save();
     this.emitState();

@@ -22,7 +22,8 @@ function render() {
       <div><small class="muted">Live now</small><b>${live ? esc(live.name) : '—'}</b>${live ? `<span class="muted">${fmtWhen(live.start)}</span>` : '<span class="muted">No scheduled service is live</span>'}</div>
       <div><small class="muted">Up next</small><b>${next ? esc(next.name) : '—'}</b>${next ? `<span class="muted">${fmtWhen(next.start)}${sc.auto && sc.switchAt ? ` · goes live by itself ${fmtIn(sc.switchAt)}` : ''}</span>` : '<span class="muted">Nothing else scheduled</span>'}</div>
       <div class="sch-now-btns">${next ? '<button class="btn primary" data-next>Next service ▶</button>' : ''}
-        ${live ? `${sc.canUndo ? `<button class="btn small" data-undo title="Put everything back to how it was before ${esc(live.name)} went live">↶ Undo</button>` : ''}<button class="btn small" data-end>End service</button>` : ''}</div>
+        ${sc.canUndo ? `<button class="btn small" data-undo title="${live ? `Put everything back to how it was before ${esc(live.name)} went live` : 'Bring back what was ended or cleared'}">↶ Undo</button>` : ''}
+        ${live ? '<button class="btn small" data-end>End service</button>' : store.service.plan ? '<button class="btn small" data-clear title="Nothing is live, but an order of service is still loaded, so dashboards still show it">Clear loaded plan</button>' : ''}</div>
     </div>
     <label class="cb sch-auto"><input type="checkbox" data-auto ${sc.auto ? 'checked' : ''}> Go to the next service by itself
       <input type="number" min="5" max="600" step="5" value="${sc.leadMinutes || 90}" data-lead style="width:70px"> minutes before it starts
