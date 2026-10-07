@@ -199,7 +199,7 @@ function editService(item, { template = false, eventId = null } = {}) {
             <select data-mic="${esc(slot.id)}"><option value="">— Nobody —</option>${people.map((p) => `<option value="${p.id}" ${p.id === a.personId ? 'selected' : ''}>${esc(p.name)}${p.role ? ` (${esc(p.role)})` : ''}</option>`).join('')}</select>
             <input type="text" data-note="${esc(slot.id)}" maxlength="200" value="${esc(a.note || '')}" placeholder="Note"></label>`;
         }).join('') || '<p class="muted">No mics yet. Add receivers on the Gear page.</p>'}</div>
-        ${people.length ? '' : '<p class="muted">No people yet. Add your team on Service &amp; People.</p>'}
+        ${people.length ? '' : '<p class="muted">No people yet. Add your team on <a href="/people">People</a>.</p>'}
       </fieldset>
       <label>Notes <textarea name="notes" rows="2" maxlength="4000">${esc(s.notes || '')}</textarea></label>
     </div>

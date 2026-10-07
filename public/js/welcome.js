@@ -102,7 +102,7 @@ function stepGear() {
 function stepPco() {
   card.innerHTML = `<form class="form">
     <h1>Planning Center (optional)</h1>
-    <p class="muted">Connect Planning Center Services to pull your order of service automatically. Using Faith Teams or a printed run sheet? Skip this. You can type or paste plans on the <b>Service &amp; People</b> page.</p>
+    <p class="muted">Connect Planning Center Services to pull your order of service automatically. Using Faith Teams or a printed run sheet? Skip this. You can type or paste plans on the <b>Live service</b> page (or ahead of time on <b>Schedule</b>).</p>
     <div class="pco-fields">${deviceForm('planningCenter', draft.planningCenter || {})}</div>
     <div class="test-result"></div>
     <div class="row-btns"><button class="btn" type="button" data-test>Test connection</button></div>
@@ -142,7 +142,7 @@ function stepDone() {
     <p class="muted">Next steps:</p>
     <ul class="next-steps">
       <li><b>Gear</b>: check everything shows Connected.</li>
-      <li><b>Service &amp; People</b>: add your team with photos and assign mics.</li>
+      <li><b>People</b>: add your team with photos. <b>Live service</b>: who has which mic.</li>
       <li><b>Dashboards</b>: pick a starter dashboard, or press <b>Edit</b> to build your own.</li>
       <li>Run events for another organization too? Use the organization menu at the top left to add or switch.</li>
     </ul>

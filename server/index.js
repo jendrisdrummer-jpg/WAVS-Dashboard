@@ -542,7 +542,7 @@ app.get('/api/comms/qr.svg', wrap(async (req, res) => {
 const pub = path.join(ROOT, 'public');
 const pages = {
   '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html', '/tv/:org/:dash': 'dashboard.html',
-  '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/schedule': 'schedule.html', '/gear': 'gear.html', '/settings': 'settings.html',
+  '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/people': 'people.html', '/schedule': 'schedule.html', '/gear': 'gear.html', '/settings': 'settings.html',
   '/comms': 'comms.html', '/comms/control': 'comms-control.html', '/comms/engine': 'comms-engine.html',
   '/login': 'login.html', '/join/:code': 'login.html',
 };

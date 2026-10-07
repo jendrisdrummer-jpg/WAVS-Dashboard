@@ -56,7 +56,7 @@ function render() {
   const rank = { 'on-stage': 0, 'picked-up': 1, assigned: 2, returned: 3 };
   slots.sort((x, y) => (rank[store.greenroom.assignments[x.id]?.status] ?? 4) - (rank[store.greenroom.assignments[y.id]?.status] ?? 4));
   const html = slots.map((s) => greenroomCard(s, { handoff })).join('')
-    || `<div class="panel panel-body muted">Nothing to show. Assign people to mics on the <a href="/admin">People &amp; Mics</a> page.</div>`;
+    || `<div class="panel panel-body muted">Nothing to show. Assign people to mics on the <a href="/admin">Live service</a> page.</div>`;
   if (html === last) return;
   last = html;
   grid.innerHTML = html;

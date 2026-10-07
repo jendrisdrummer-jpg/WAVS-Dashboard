@@ -1,6 +1,6 @@
 // Finding faces in people's photos, so every card shape keeps the face in frame.
 //
-// Runs in the browser on the Service & People page (whoever adds photos), once per photo: new
+// Runs in the browser on the People page (whoever adds photos), once per photo: new
 // photos are measured as soon as they're uploaded, and older photos when the page is opened.
 // The face finder (SSD MobileNet, via face-api) and its model are served by the dashboard
 // computer, so nothing leaves it and no internet is needed. The result is saved with the person

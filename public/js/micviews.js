@@ -137,7 +137,7 @@ export function mountMicView(el, options = {}, { getSlots } = {}) {
       for (const id of items.keys()) if (!slots.some((s) => s.id === id)) items.delete(id);
       for (const s of slots) if (!items.has(s.id)) items.set(s.id, skeleton(s));
       el.replaceChildren(...slots.map((s) => items.get(s.id).root));
-      if (!slots.length) el.innerHTML = `<div class="w-empty">${o.show === 'all' ? 'No mics configured' : 'Nobody to show yet. Assign people to mics on the <a href="/admin">Setup</a> page.'}</div>`;
+      if (!slots.length) el.innerHTML = `<div class="w-empty">${o.show === 'all' ? 'No mics configured' : 'Nobody to show yet. Assign people to mics on the <a href="/admin">Live service</a> page.'}</div>`;
       if (o.levels === 'meters') applyMeters(el);
     }
     for (const slot of slots) {

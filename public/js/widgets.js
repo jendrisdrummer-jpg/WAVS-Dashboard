@@ -321,7 +321,7 @@ export const WIDGETS = {
       return {
         update() {
           const svc = store.service;
-          if (!svc.plan) return setHTML(body, empty(noServiceText(store.config.planningCenter && !svc.idle ? 'Loading Planning Center…' : 'No service plan yet.<br><small>Add one on the <a href="/admin#plan">Setup</a> page (Planning Center or typed in).</small>')));
+          if (!svc.plan) return setHTML(body, empty(noServiceText(store.config.planningCenter && !svc.idle ? 'Loading Planning Center…' : 'No service plan yet.<br><small>Add one on the <a href="/admin#plan">Live service</a> page or plan ahead on <a href="/schedule">Schedule</a>.</small>')));
           const timing = planTiming(svc);
           const cur = svc.current?.itemId;
           const rows = svc.plan.items.map((it) => {

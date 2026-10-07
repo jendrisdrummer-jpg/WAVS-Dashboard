@@ -151,6 +151,7 @@ function applyTheme(cfg) {
 
 /** Small line icons (24px grid) for the menu and pages. */
 export const ICONS = {
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
   menu: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>',
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
@@ -175,7 +176,7 @@ export function can(role) {
   if (!a?.enabled) return true;
   return (RANKS[a.role] || 0) >= RANKS[role];
 }
-const PAGE_ROLE = { gear: 'admin', settings: 'admin', welcome: 'admin', admin: 'producer', schedule: 'producer' };
+const PAGE_ROLE = { gear: 'admin', settings: 'admin', welcome: 'admin', admin: 'producer', schedule: 'producer', people: 'producer' };
 // Comms control also opens for comms leads on their phones (checked by the comms server), so it's only hidden from the menu.
 const NAV_ROLE = { ...PAGE_ROLE, comms: 'producer' };
 
@@ -186,7 +187,8 @@ export const NAV = [
   ['/rf', 'RF', 'rf', 'rf'],
   ['/gear', 'Gear', 'gear', 'plug'],
   ['/schedule', 'Schedule', 'schedule', 'calendar'],
-  ['/admin', 'Service & People', 'admin', 'list'],
+  ['/admin', 'Live service', 'admin', 'list'],
+  ['/people', 'People', 'people', 'users'],
   ['/comms/control', 'Comms', 'comms', 'headset'],
   ['/settings', 'Settings', 'settings', 'settings'],
 ];
