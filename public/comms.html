@@ -44,8 +44,13 @@
       <button id="sign-out">Sign out of comms</button>
     </div>
     <div class="cx-talkers" id="talkers" aria-live="polite"></div>
-    <div class="cx-channels" id="channels"></div>
     <p class="cx-hint muted small" id="hint"></p>
+    <div class="cx-keys" id="channels"></div>
+    <div class="cx-bottom">
+      <button class="cx-mix-btn" id="mix-btn" type="button" aria-expanded="false">🎚<span>Mix</span></button>
+      <button class="cx-ptt" id="ptt" type="button">TALK</button>
+    </div>
+    <div class="cx-mix hidden" id="mix" role="dialog" aria-label="Volumes"></div>
   </section>
 
   <section class="cx-gone hidden" id="gone"><h1>Signed out</h1><p class="muted" id="gone-why"></p><button class="btn primary big" id="gone-btn">Sign in again</button></section>

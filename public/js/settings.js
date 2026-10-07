@@ -1,5 +1,5 @@
 // Settings for the active organization: branding, PIN, Planning Center, alerts, organizations.
-import { start, store, esc, api, toast, icon } from './common.js';
+import { start, store, esc, api, toast, icon, confirmBox, askText } from './common.js';
 import { deviceForm, readForm, runTest } from './forms.js';
 
 await start({ page: 'settings' });
@@ -55,7 +55,7 @@ pinForm.onsubmit = (e) => {
   if (pin.length < 4) return toast('Use at least 4 digits', true);
   save({ security: { adminPin: pin } }, 'PIN set').then(() => { try { localStorage.setItem('wavs-pin', pin); } catch { /* ignore */ } });
 };
-document.getElementById('pin-remove').onclick = () => { if (confirm('Remove the PIN?')) save({ security: { adminPin: '' } }, 'PIN removed'); };
+document.getElementById('pin-remove').onclick = async () => { if (await confirmBox('Remove the PIN?')) save({ security: { adminPin: '' } }, 'PIN removed'); };
 
 // ---------------------------------------------------------------- Planning Center
 const pcoFields = document.getElementById('pco-fields');
@@ -77,7 +77,7 @@ document.getElementById('pco-form').onsubmit = (e) => {
   const picked = [...typesEl.querySelectorAll('[data-st]:checked')].map((c) => c.dataset.st);
   save({ planningCenter: { ...pco, serviceTypes: typesEl.innerHTML ? picked : s.planningCenter?.serviceTypes || [] } }, 'Planning Center saved');
 };
-document.getElementById('pco-remove').onclick = () => { if (confirm('Disconnect Planning Center?')) save({ planningCenter: null }, 'Planning Center disconnected'); };
+document.getElementById('pco-remove').onclick = async () => { if (await confirmBox('Disconnect Planning Center?')) save({ planningCenter: null }, 'Planning Center disconnected'); };
 
 // ---------------------------------------------------------------- alerts & automation
 const beh = document.getElementById('beh-form').elements;
@@ -109,14 +109,14 @@ list.addEventListener('click', async (e) => {
   if (!b) return;
   const o = cfg.orgs.find((x) => x.id === (b.dataset.switch || b.dataset.del));
   try {
-    if (b.dataset.switch && confirm(`Switch every screen to ${o.name}?`)) await api('POST', '/api/orgs/active', { id: o.id });
-    if (b.dataset.del && confirm(`Delete ${o.name}? Its gear, people, photos, dashboards and plans are removed for good.`)) {
+    if (b.dataset.switch && await confirmBox(`Switch every screen to ${o.name}?`)) await api('POST', '/api/orgs/active', { id: o.id });
+    if (b.dataset.del && await confirmBox(`Delete ${o.name}? Its gear, people, photos, dashboards and plans are removed for good.`)) {
       await api('DELETE', `/api/orgs/${encodeURIComponent(o.id)}`);
     }
   } catch (err) { toast(err.message, true); }
 });
 document.getElementById('org-add').onclick = async () => {
-  const name = prompt('Name of the new organization (e.g. "Acme Productions")');
+  const name = await askText('Name of the new organization (e.g. "Acme Productions")');
   if (!name?.trim()) return;
   try { await api('POST', '/api/orgs', { name: name.trim() }); } catch (err) { toast(err.message, true); }
 };
@@ -213,21 +213,21 @@ acct.addEventListener('click', async (e) => {
   const b = e.target.closest('button');
   if (!b) return;
   if (b.dataset.copy) {
-    try { await navigator.clipboard.writeText(b.dataset.copy); toast('Link copied'); } catch { prompt('Copy this link', b.dataset.copy); }
+    try { await navigator.clipboard.writeText(b.dataset.copy); toast('Link copied'); } catch { await askText('Copy this link', b.dataset.copy); }
   }
   if (b.dataset.show) { lastInvite = acct._invites.find((i) => i.code === b.dataset.show); drawAccounts(); }
-  if (b.dataset.revoke && confirm('Cancel this invite link? People who already joined keep their accounts.')) {
+  if (b.dataset.revoke && await confirmBox('Cancel this invite link? People who already joined keep their accounts.')) {
     await api('DELETE', `/api/users/invite/${b.dataset.revoke}`).catch((err) => toast(err.message, true));
     if (lastInvite?.code === b.dataset.revoke) lastInvite = null;
     drawAccounts();
   }
-  if (b.dataset.reset && confirm('Reset this password? They are signed out everywhere and get a temporary password from you.')) {
+  if (b.dataset.reset && await confirmBox('Reset this password? They are signed out everywhere and get a temporary password from you.')) {
     try {
       const r = await api('POST', `/api/users/${b.dataset.reset}/reset`);
-      prompt('Temporary password. Give it to them; they can change it from their name in the top bar.', r.password);
+      await askText('Temporary password. Give it to them; they can change it from their name in the top bar.', r.password);
     } catch (err) { toast(err.message, true); }
   }
-  if (b.dataset.delete && confirm('Delete this account everywhere (all organizations)?')) {
+  if (b.dataset.delete && await confirmBox('Delete this account everywhere (all organizations)?')) {
     try { await api('DELETE', `/api/users/${b.dataset.delete}`); drawAccounts(); } catch (err) { toast(err.message, true); }
   }
 });
@@ -307,10 +307,10 @@ comp.addEventListener('click', async (e) => {
   if (!t) return;
   try {
     if (t.dataset.off) {
-      if (t.dataset.off === 'on' && !confirm('Turn on access from anywhere?\n\nThe dashboard gets a secure web address that works on mobile data. Everyone must sign in with their account.')) return;
+      if (t.dataset.off === 'on' && !await confirmBox('Turn on access from anywhere?\n\nThe dashboard gets a secure web address that works on mobile data. Everyone must sign in with their account.')) return;
       await api('POST', '/api/comms/remote', { on: t.dataset.off === 'on' });
     }
-    if (t.dataset.copyOff) { try { await navigator.clipboard.writeText(t.dataset.copyOff); toast('Copied'); } catch { prompt('Copy this address', t.dataset.copyOff); } }
+    if (t.dataset.copyOff) { try { await navigator.clipboard.writeText(t.dataset.copyOff); toast('Copied'); } catch { await askText('Copy this address', t.dataset.copyOff); } }
     if (t.hasAttribute('data-off-quick')) await api('POST', '/api/comms/remote', { mode: 'quick' });
   } catch (err) { toast(err.message, true); }
   remoteEdit = false;
@@ -356,7 +356,7 @@ comp.addEventListener('click', async (e) => {
     drawComputer();
   }
   if (e.target.id === 'do-upd') {
-    if (!confirm('Update now? Screens showing the dashboard will reload by themselves when it is back (about 30 seconds). Avoid doing this during a live event.')) return;
+    if (!await confirmBox('Update now? Screens showing the dashboard will reload by themselves when it is back (about 30 seconds). Avoid doing this during a live event.')) return;
     upd = { ...upd, busy: 'Updating… downloading the new version and installing it.' };
     store.holdReload = true;
     drawComputer();
@@ -459,7 +459,7 @@ move.addEventListener('click', async (e) => {
   }
   if (e.target.id === 'import-go') {
     const choices = Object.fromEntries([...move.querySelectorAll('[data-choice]')].map((s) => [s.dataset.choice, s.value]));
-    if (Object.values(choices).includes('replace') && !confirm('Replace the organization on this computer with the one in the backup? Its current gear, people and dashboards here are overwritten.')) return;
+    if (Object.values(choices).includes('replace') && !await confirmBox('Replace the organization on this computer with the one in the backup? Its current gear, people and dashboards here are overwritten.')) return;
     store.holdReload = true;
     try {
       imp.result = await api('POST', '/api/backup/import', { token: imp.token, password: imp.password || '', choices });

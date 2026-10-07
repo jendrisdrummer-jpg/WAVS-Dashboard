@@ -49,7 +49,9 @@ You don't need to edit a config file.
 | `/dashboards` or `/d/<name>` | **Dashboards.** Pick one from the drop-down in the header. Each screen remembers the last one it showed. |
 | `/greenroom` | The **mic board**: one tall column per mic with the person's name, photo, battery and a live RF/audio graph, plus **Picked up / On stage / Returned** buttons (`?handoff=1` keeps them on, `?view=cards` for the older card view). |
 | `/rf` | Every receiver channel, plus a frequency plot that flags carriers spaced too closely. |
-| `/admin` | **Service & People**: the order of service (Planning Center, the ProPresenter playlist, or typed in), people and photos, mic assignments. |
+| `/admin` | **Live service**: what's running now: its order of service (Planning Center, the ProPresenter playlist, or typed in) and who has which mic (tap a mic, then a person). |
+| `/people` | **People**: your team, hosts and guests with photos (faces kept in frame) and colours. |
+| `/schedule` | **Schedule**: services planned ahead, events, repeating services. |
 | `/gear` | **Gear**: shows whether each receiver, switcher, ProPresenter and Planning Center is connected. Add, edit, **Test** and remove devices here. |
 | `/settings` | **Settings**: accounts and invites, name, colour, logo, Planning Center, alert thresholds, organizations, updates. |
 | `/login`, `/join/<code>` | Sign in, or create an account from an invite link. |
@@ -137,7 +139,7 @@ In **✎ Edit**, every widget has **A− / A+** to make its contents smaller or 
 ### Mic board
 The **Green Room TV** dashboard and `/greenroom` show one column per mic:
 - **Who:** the person's first name in large type, then their surname and role, with their photo
-  on a coloured glow. You can pick each person's colour on the Service & People page (🎨 next to their photo),
+  on a coloured glow. You can pick each person's colour on the People page (🎨 next to their photo),
   otherwise one is picked automatically.
 - **Which mic:** the mic label and its status (Assigned, Picked up, On stage).
 - **Health:** battery in the corner, plus a rolling graph across the bottom. The bars are RF
@@ -149,7 +151,7 @@ Cut-out photos (PNG with a transparent background) look best, because the colour
 
 **Faces stay in frame.** When a photo is added, the dashboard finds the face in it, so circles,
 tiles and cards center and zoom in on the face, and tall strips keep the head in view. The first
-time Service & People is opened after updating, every existing photo is checked too. If it picks
+time People is opened after updating, every existing photo is checked too. If it picks
 the wrong spot (side profile, sunglasses, a group photo), click **🎯 Adjust** next to the person,
 drag the circle onto their face and set its size; that setting is kept. The face finder runs in
 the browser using a model that comes with the dashboard, so photos never leave your computers and
@@ -206,7 +208,7 @@ and the comms roster are the same for every service.
 Schedule page). If the live one is still running then, it waits until that one is planned to end,
 but no later than 15 minutes before the next one starts. **Next service ▶** on the Home page
 switches straight away. Going live loads the service's mics (everyone back to "Assigned"), name,
-notes and order of service. Changes made on Service & People while a service is live are saved
+notes and order of service. Changes made on Live service while a service is live are saved
 to it.
 
 **Undo / End.** "↶ Undo" (Home and Schedule) puts everything back to how it was just before the
@@ -229,20 +231,20 @@ to its next playlist item every 45 seconds, so with it in Gear the plan appears 
    <https://api.planningcenteronline.com/oauth/applications>.
 2. Paste the Application ID and Secret into **Settings → Planning Center**, press **Test**, and
    tick the service types to follow.
-3. The next upcoming plan loads automatically. The **Service & People** page lists upcoming
+3. The next upcoming plan loads automatically. The **Live service** page lists upcoming
    plans across your service types so you can switch.
 
 The plan gives you items (songs with keys, headers, lengths), service times, and the current item.
 
 ### ProPresenter playlist as the order of service
-No Planning Center? On **Service & People**, press **Use the ProPresenter playlist**. The playlist
+No Planning Center? On **Live service**, press **Use the ProPresenter playlist**. The playlist
 that's active in ProPresenter becomes the order of service, headers included, and it advances as
 the operator cues each item.
 
 
 ### Matching ProPresenter's playlist to your plan
 When the operator cues an item in ProPresenter's active playlist, the plan (and the **Service timeline** widget) moves to the matching plan item:
-1. **Your links** come first. Set them on **Service & People → Match with ProPresenter**, which lists every playlist item with a dropdown: **Auto**, a plan item, or **Don't move the plan** (for an announcement loop, say).
+1. **Your links** come first. Set them on **Live service → Match with ProPresenter**, which lists every playlist item with a dropdown: **Auto**, a plan item, or **Don't move the plan** (for an announcement loop, say).
 2. **Remembered links** come next. Links are remembered by name, so next week's plan matches without redoing them. For example, "Countdown Loop" is always "Pre-Service".
 3. Then **the same name**, or one name containing the other.
 4. Finally **by position**, when the playlist and the plan have the same number of items.
@@ -270,7 +272,7 @@ planned (red if it ran long). That's your "how did Sunday go".
 
 ### Faith Teams and other sources
 Faith Teams' public API covers people and giving, but not service plans. Until it does, use
-**Use the ProPresenter playlist** or **Type or paste a plan** on the Service & People page:
+**Use the ProPresenter playlist** or **Type or paste a plan** on the Live service page:
 
 ```
 # Worship
@@ -352,6 +354,20 @@ API keys and tokens are stored with the organization's settings and are never se
 
 ## Comms (intercom on phones)
 
+**On the phone** (works like a Solidcom headset with channels): the channels are a grid of keys.
+Tap the keys you want to talk on (they light up; your pick is remembered), then use the one big
+button at the bottom: **tap** for an open mic (it reads MIC ON; tap again for MIC OFF) or **hold**
+to talk. The 🔊 corner of each key turns listening on or off, a key glows when someone is talking
+on it, and volumes are under **Mix**.
+
+**Audio in / out (sound board).** Plug an audio interface into the dashboard computer (where the
+comms engine runs) and wire it to the board. On the **Comms** page, under *Audio in / out*: an
+**audio in** brings one interface input (board talkback, program mix, a pastor's mic) into comms
+channels; an **audio out** sends comms channels to one interface output (to record comms, or into
+someone's in-ears). The interfaces listed are the ones the engine computer sees; each row shows
+✓ Working or what went wrong.
+
+
 Your crew talk and listen through their phone's browser. Nothing needs installing.
 
 **Channels.** Directors, Cam Ops, Lighting, GFX, Audio and Stage come set up. Rename, recolour, add or remove them on the Comms page. Each person has a **T** (talk) and **L** (listen) switch per channel. Phones have a volume slider and a listen switch per channel. **Hold TALK** to talk, or **tap it once** to latch it on and tap again to stop.
@@ -393,7 +409,7 @@ With both off, anyone on the network can join and pick a position.
 
 This is built for **15–20 people** on one computer. On the same Wi-Fi, audio goes directly from each phone to the comms engine without going through the internet.
 
-### Behringer WING (or any audio interface)
+### Behringer WING (or any audio interface): details
 Connect the WING to the dashboard computer over USB. On the comms engine page, under **Audio interface**:
 - **Input from console**: choose the WING, a USB channel and the comms channels it feeds. For example, WING talkback on USB 1 goes into **GFX**.
 - **Output to console**: choose the WING, a USB channel and the comms channels it carries. For example, Directors goes to USB 3, which you route to a WING bus.

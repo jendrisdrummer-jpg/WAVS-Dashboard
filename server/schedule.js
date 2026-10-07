@@ -223,7 +223,7 @@ export class Schedule extends EventEmitter {
     return s;
   }
 
-  /** Changes made while live (mics on Service & People, the typed plan) are kept with the service. */
+  /** Changes made while live (mics on Live service, the typed plan) are kept with the service. */
   syncLive(fields) {
     const s = this.live();
     if (!s) return;

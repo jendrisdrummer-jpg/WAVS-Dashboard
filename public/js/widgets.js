@@ -8,9 +8,7 @@
 // Option field types: text | textarea | number | checkbox | select (choices: () => [[value, label]])
 //                     multi (several of choices) | mics. An option's `group` puts it under a heading.
 // `presets` (optional) adds ready-made variants of a widget to the Add widget panel.
-import {
-  store, esc, setHTML, api, toast, fmtDuration, micView, applyMeters,
-} from './common.js';
+import { store, esc, setHTML, api, toast, fmtDuration, micView, applyMeters, confirmBox, alertChips } from './common.js';
 import { buildTile } from './video.js';
 import { spacingConflicts, drawSpectrum, rfRows } from './views.js';
 import { planTiming, currentInfo, serviceClock, planSource, noServiceText } from './plan.js';
@@ -323,7 +321,7 @@ export const WIDGETS = {
       return {
         update() {
           const svc = store.service;
-          if (!svc.plan) return setHTML(body, empty(noServiceText(store.config.planningCenter && !svc.idle ? 'Loading Planning Center…' : 'No service plan yet.<br><small>Add one on the <a href="/admin#plan">Setup</a> page (Planning Center or typed in).</small>')));
+          if (!svc.plan) return setHTML(body, empty(noServiceText(store.config.planningCenter && !svc.idle ? 'Loading Planning Center…' : 'No service plan yet.<br><small>Add one on the <a href="/admin#plan">Live service</a> page or plan ahead on <a href="/schedule">Schedule</a>.</small>')));
           const timing = planTiming(svc);
           const cur = svc.current?.itemId;
           const rows = svc.plan.items.map((it) => {
@@ -584,7 +582,7 @@ export const WIDGETS = {
         try {
           if (b.dataset.pin) await api('POST', '/api/streams/pin', { id: b.dataset.pin });
           if (b.dataset.unpin != null) await api('POST', '/api/streams/pin', { id: null });
-          if (b.dataset.hide && confirm('Hide this comment from the dashboards? (It stays on YouTube/Facebook.)')) await api('POST', '/api/streams/hide', { id: b.dataset.hide });
+          if (b.dataset.hide && await confirmBox('Hide this comment from the dashboards? (It stays on YouTube/Facebook.)')) await api('POST', '/api/streams/hide', { id: b.dataset.hide });
         } catch (err) { toast(err.message, true); }
       });
       let stick = true;
@@ -628,7 +626,7 @@ export const WIDGETS = {
       return {
         update() {
           setHTML(body, store.alerts.length
-            ? `<div class="list">${store.alerts.map((a) => `<span class="alert ${a.level}">${esc(a.text)}</span>`).join('')}</div>`
+            ? `<div class="list">${alertChips(store.alerts)}</div>`
             : '<div class="w-empty ok">✓ All clear</div>');
         },
       };
@@ -699,8 +697,8 @@ export const WIDGETS = {
         const cb = e.target.closest('input[data-id]');
         if (cb) api('POST', `/api/checklists/${encodeURIComponent(name)}/toggle`, { itemId: cb.dataset.id, done: cb.checked }).catch((err) => toast(err.message, true));
       });
-      ctx.addAction('↺', 'Untick everything', () => {
-        if (confirm('Untick every item on this checklist?')) api('POST', `/api/checklists/${encodeURIComponent(name)}/reset`).catch((err) => toast(err.message, true));
+      ctx.addAction('↺', 'Untick everything', async () => {
+        if (await confirmBox('Untick every item on this checklist?')) api('POST', `/api/checklists/${encodeURIComponent(name)}/reset`).catch((err) => toast(err.message, true));
       });
       ctx.addAction('✎', 'Edit items', async () => {
         if (!editing) {

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>People</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="page">
+    <div class="page-head"><div><h1>People</h1><p class="muted">Your team, hosts and guests, with their photos. Who has which mic is on <a href="/admin">Live service</a> (and planned ahead on <a href="/schedule">Schedule</a>).</p></div></div>
+    <div class="panel">
+      <h2>People</h2>
+      <div class="panel-body" style="display:grid;gap:14px">
+        <form class="grid" id="add-person">
+          <label>Name <input type="text" name="name" required placeholder="Full name"></label>
+          <label>Role <input type="text" name="role" placeholder="Worship Leader, Host…"></label>
+          <label>Photo <input type="file" name="photo" accept="image/*"></label>
+          <button class="btn primary" type="submit">Add person</button>
+        </form>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+          <input type="search" id="search" placeholder="Search people…" aria-label="Search people" style="max-width:320px">
+          <span class="face-status small" id="face-status"></span>
+        </div>
+        <div class="people" id="people"></div>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="/js/people.js"></script>
+</body>
+</html>

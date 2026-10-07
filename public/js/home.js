@@ -1,5 +1,5 @@
 // Home: what's happening now, where to go, and whether the gear is healthy.
-import { start, store, onRender, esc, setHTML, icon, fmtDuration, can, api, toast } from './common.js';
+import { start, store, onRender, esc, setHTML, icon, fmtDuration, can, api, toast, confirmBox, alertChips } from './common.js';
 import { currentInfo, serviceClock, planSource } from './plan.js';
 import { fmtWhen, fmtIn, micChanges, changesHtml, scheduleAction } from './schedulekit.js';
 
@@ -11,7 +11,8 @@ setHTML(document.getElementById('links'), [
   ['/greenroom', 'mic', 'Green Room', 'Who has which mic'],
   ['/rf', 'rf', 'RF & batteries', 'Every channel and frequency'],
   ['/schedule', 'calendar', 'Schedule', 'Services planned ahead', 'producer'],
-  ['/admin', 'list', 'Service & people', 'Plan, people, mic assignments', 'producer'],
+  ['/admin', 'list', 'Live service', 'Order of service, who has which mic', 'producer'],
+  ['/people', 'users', 'People', 'Your team and their photos', 'producer'],
   ['/comms/control', 'headset', 'Comms', 'Channels, people, cues', 'producer'],
   ['/gear', 'plug', 'Gear', 'Connections and setup', 'admin'],
   ['/settings', 'settings', 'Settings', 'Accounts, branding, updates', 'admin'],
@@ -68,11 +69,55 @@ document.getElementById('sched').addEventListener('click', async (e) => {
   if (scheduleAction(e)) return;
   if (!e.target.closest('[data-next]')) return;
   const next = store.schedule.services.find((s) => s.id === store.schedule.nextId);
-  if (!next || !confirm(`Go to “${next.name}” now? Its mic plan and order of service are loaded, and everyone's mic goes back to “Assigned”.`)) return;
+  if (!next || !await confirmBox(`Go to “${next.name}” now? Its mic plan and order of service are loaded, and everyone's mic goes back to “Assigned”.`)) return;
   try { await api('POST', '/api/schedule/next'); toast(`${next.name} is live`); } catch (err) { toast(err.message, true); }
 });
 
+// ---------------------------------------------------------------- setup checklist
+// For admins of a new organization (or a new admin): the steps that make the dashboard useful,
+// ticked off as they're done. Hidden when everything is done, or with "Hide".
+let system = null;
+if (can('admin')) api('GET', '/api/system').then((s) => { system = s; render(); }).catch(() => {});
+const HIDE_CHECK = `wavs-checklist-hidden:${cfg.orgId}`;
+let checkHidden = false;
+try { checkHidden = localStorage.getItem(HIDE_CHECK) === '1'; } catch { /* ignore */ }
+
+function checklist() {
+  const el = document.getElementById('check');
+  if (!can('admin') || checkHidden) { el.classList.add('hidden'); return; }
+  const devices = [...Object.values(store.state.receivers), ...Object.values(store.state.propresenter), ...Object.values(store.state.switchers)];
+  const steps = [
+    ['Add your gear', 'Wireless receivers, ProPresenter, the switcher', '/gear', devices.length > 0],
+    ['Add your team', 'Names and photos for the mic board', '/people', store.greenroom.people.length > 0],
+    ['Plan a service', 'A conference session or a repeating Sunday', '/schedule', store.schedule.services.length > 0],
+    ['Set up comms', 'Channels, positions, who talks to whom', '/comms/control', (store.comms.members || []).length > 0],
+    ['Invite your crew', 'Accounts so people can sign in (Settings → Accounts)', '/settings#accounts', Boolean(cfg.auth?.enabled)],
+    ['Run it in the background', 'Starts with the computer, no Terminal needed', '/settings', Boolean(system?.service?.installed)],
+  ];
+  const done = steps.filter((x) => x[3]).length;
+  if (done === steps.length) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  setHTML(el, `<h2>Getting set up <span class="muted">${done} of ${steps.length} done</span><button class="btn small" data-hide-check>Hide</button></h2>
+    <div class="panel-body check-steps">${steps.map(([t, sub, href, ok]) => `<a class="check-step ${ok ? 'ok' : ''}" href="${href}">
+      <span class="check-box">${ok ? '✓' : ''}</span><span><b>${t}</b><small>${sub}</small></span></a>`).join('')}</div>`);
+}
+document.getElementById('check').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-hide-check]')) return;
+  checkHidden = true;
+  try { localStorage.setItem(HIDE_CHECK, '1'); } catch { /* ignore */ }
+  render();
+});
+
+// Phones: the few things people do from a phone, as big buttons.
+setHTML(document.getElementById('phone-actions'), [
+  ['/comms', 'headset', 'Comms'],
+  ['/greenroom', 'mic', 'Green Room'],
+  ['/admin', 'list', 'Live service', 'producer'],
+  ['/schedule', 'calendar', 'Schedule', 'producer'],
+].filter((l) => !l[3] || can(l[3])).map(([href, ic, label]) => `<a class="phone-act" href="${href}">${icon(ic)}<b>${label}</b></a>`).join(''));
+
 function render() {
+  checklist();
   scheduleCard();
   const svc = store.service;
   const info = currentInfo(svc);
@@ -99,9 +144,7 @@ function render() {
     + `<a class="htile add" href="/dashboards?new=1">${icon('plus', 'ic htile-ic')}<b>New dashboard</b><small>Build one for a role or screen</small></a>`);
 
   setHTML(document.getElementById('gear'), gearSummary());
-  setHTML(document.getElementById('alerts'), store.alerts.length
-    ? store.alerts.map((a) => `<span class="alert ${a.level}">${esc(a.text)}</span>`).join('')
-    : '<div class="w-empty ok">✓ All clear</div>');
+  setHTML(document.getElementById('alerts'), alertChips(store.alerts, { empty: '<div class="w-empty ok">✓ All clear</div>' }));
 }
 
 onRender(render);

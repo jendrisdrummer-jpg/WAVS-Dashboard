@@ -1,5 +1,5 @@
 // Comms control: for the producer (admin PIN) or a lead (signed in on comms as a lead).
-import { start, store, esc, setHTML, toast, api } from './common.js';
+import { start, store, esc, setHTML, toast, api, confirmBox, askText } from './common.js';
 
 await start({ page: 'comms' });
 
@@ -13,7 +13,7 @@ function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws`);
   ws.onopen = () => hello();
   ws.onclose = () => setTimeout(connect, 1500);
-  ws.onmessage = (ev) => {
+  ws.onmessage = async (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.t === 'state') { state = msg.state; if (msg.levels) levels = msg.levels; if ('asLead' in msg) asLead = msg.asLead; render(); }
     else if (msg.t === 'levels') { levels = msg.levels; meters(); }
@@ -24,7 +24,7 @@ function connect() {
         return;
       }
       if (msg.error === 'PIN required') {
-        const pin = prompt('Enter the admin PIN to control comms');
+        const pin = await askText('Enter the admin PIN to control comms');
         if (pin == null) { $('sub').textContent = 'The admin PIN is needed to control comms.'; return; }
         localStorage.setItem('wavs-pin', pin);
         return hello(true);
@@ -100,7 +100,7 @@ $('join').addEventListener('click', async (e) => {
   if (t && !t.disabled) { tab = t.dataset.tab; renderJoin(); }
   if (e.target.id === 'offsite-toggle') {
     const on = !info.remote?.enabled;
-    if (on && !confirm('Turn on off-site access?\n\nPhones on any network (mobile data, a hotspot) can then join comms through a secure Cloudflare link. Your team can also open the dashboard through it after signing in with their account.')) return;
+    if (on && !await confirmBox('Turn on off-site access?\n\nPhones on any network (mobile data, a hotspot) can then join comms through a secure Cloudflare link. Your team can also open the dashboard through it after signing in with their account.')) return;
     try { await api('POST', '/api/comms/remote', { on }); } catch (err) { return toast(err.message, true); }
     if (on) tab = 'anywhere';
     refreshInfo();
@@ -130,6 +130,7 @@ function render() {
   renderAccess();
   if (!chDraft) renderChannels(); // don't overwrite what's being typed
   renderPositions();
+  if (!audioDraft) renderAudio(); // don't overwrite what's being changed
   const sel = $('add-form').elements.position;
   const opts = state.positions.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   if (sel._opts !== opts) { const v = sel.value; sel.innerHTML = opts; sel._opts = opts; if (v) sel.value = v; }
@@ -203,11 +204,11 @@ function renderPeople() {
   meters();
 }
 
-$('people').addEventListener('click', (e) => {
+$('people').addEventListener('click', async (e) => {
   const row = e.target.closest('[data-id]');
   if (!row) return;
   const id = row.dataset.id;
-  const m = state.members.find((x) => x.id === id);
+  const m = state.members.find(async (x) => x.id === id);
   const perm = e.target.closest('[data-perm]');
   if (perm) {
     const cur = m.perms?.[perm.dataset.ch] || {};
@@ -218,18 +219,18 @@ $('people').addEventListener('click', (e) => {
   e.target.closest('details')?.removeAttribute('open');
   if (act === 'mute') send({ t: 'mute', memberId: id, on: !m.muted });
   if (act === 'lead') send({ t: 'lead', memberId: id, on: !m.lead });
-  if (act === 'rename') { const n = prompt('Name', m.name); if (n?.trim()) send({ t: 'edit', memberId: id, name: n }); }
+  if (act === 'rename') { const n = await askText('Name', m.name); if (n?.trim()) send({ t: 'edit', memberId: id, name: n }); }
   if (act === 'code') {
-    const c = prompt(`Personal code for ${m.name}.\nThey type it when signing in, so nobody else can sign in as them.\nLeave empty to remove it.`, '');
+    const c = await askText(`Personal code for ${m.name}.\nThey type it when signing in, so nobody else can sign in as them.\nLeave empty to remove it.`, '');
     if (c != null) send({ t: 'edit', memberId: id, code: c });
   }
-  if (act === 'signout' && confirm(`Sign ${m.name} out? They can sign in again with their name.`)) send({ t: 'signout', memberId: id });
-  if (act === 'remove' && confirm(`Remove ${m.name} from comms?`)) send({ t: 'remove', memberId: id });
+  if (act === 'signout' && await confirmBox(`Sign ${m.name} out? They can sign in again with their name.`)) send({ t: 'signout', memberId: id });
+  if (act === 'remove' && await confirmBox(`Remove ${m.name} from comms?`)) send({ t: 'remove', memberId: id });
 });
-$('people').addEventListener('change', (e) => {
+$('people').addEventListener('change', async (e) => {
   if (e.target.dataset.act !== 'position') return;
   const id = e.target.closest('[data-id]').dataset.id;
-  if (confirm('Switch position? Their channels reset to that position\'s defaults.')) send({ t: 'position', memberId: id, position: e.target.value });
+  if (await confirmBox('Switch position? Their channels reset to that position\'s defaults.')) send({ t: 'position', memberId: id, position: e.target.value });
   else render();
 });
 
@@ -258,9 +259,9 @@ function renderAccess() {
     ${state.access.hasTeamPassword ? '<button class="btn small danger" id="team-clear">Remove</button>' : ''}</div>`);
 }
 $('access').addEventListener('change', (e) => { if (e.target.id === 'roster-only') send({ t: 'access', rosterOnly: e.target.checked }); });
-$('access').addEventListener('click', (e) => {
-  if (e.target.id === 'team-set') { const p = prompt('Team password'); if (p?.trim()) send({ t: 'access', teamPassword: p.trim() }); }
-  if (e.target.id === 'team-clear' && confirm('Remove the team password?')) send({ t: 'access', teamPassword: '' });
+$('access').addEventListener('click', async (e) => {
+  if (e.target.id === 'team-set') { const p = await askText('Team password'); if (p?.trim()) send({ t: 'access', teamPassword: p.trim() }); }
+  if (e.target.id === 'team-clear' && await confirmBox('Remove the team password?')) send({ t: 'access', teamPassword: '' });
 });
 
 // Channels editor (local draft until Save)
@@ -280,11 +281,11 @@ $('channels').addEventListener('input', (e) => {
   chDraft[row.dataset.i][e.target.dataset.k] = e.target.value;
   $('ch-btns').innerHTML = chButtons();
 });
-$('channels').addEventListener('click', (e) => {
+$('channels').addEventListener('click', async (e) => {
   if (e.target.closest('[data-del]')) {
     chDraft ||= structuredClone(state.channels);
     const i = Number(e.target.closest('[data-i]').dataset.i);
-    if (!confirm(`Delete channel "${chDraft[i].name}"? People lose access to it.`)) return;
+    if (!await confirmBox(`Delete channel "${chDraft[i].name}"? People lose access to it.`)) return;
     chDraft.splice(i, 1);
     renderChannels();
   }
@@ -295,6 +296,77 @@ $('channels').addEventListener('click', (e) => {
   }
   if (e.target.id === 'ch-cancel') { chDraft = null; $('channels')._html = null; renderChannels(); }
   if (e.target.id === 'ch-save') { send({ t: 'channels', channels: chDraft }); chDraft = null; $('channels')._html = null; }
+});
+
+// ---------------------------------------------------------------- audio in / out
+// Sound board <-> comms through an audio interface on the dashboard computer (where the comms
+// engine runs). An "in" brings one interface input (e.g. the board's talkback or program feed)
+// into comms channels; an "out" sends a mix of comms channels to one interface output
+// (e.g. into a board channel for IEMs or recording). The engine lists the interfaces it sees.
+let audioDraft = null;
+function renderAudio() {
+  const list = audioDraft || state.ports || [];
+  const devs = state.engine.devices;
+  const errs = state.engine.portErrors || {};
+  const saved = new Set((state.ports || []).map((p) => p.id));
+  const row = (p, i) => {
+    const options = devs ? devs[p.kind] : [];
+    const known = options.some((d) => d.label === p.device);
+    const status = !state.engine.online ? '<small class="muted">Engine not running</small>'
+      : !saved.has(p.id) || audioDraft ? '<small class="muted">Not saved yet</small>'
+        : errs[p.id] ? `<small class="port-err">⚠ ${esc(errs[p.id])}</small>` : '<small class="g-ok-text">✓ Working</small>';
+    return `<div class="aio-row" data-i="${i}">
+      <b class="port-kind ${p.kind}">${p.kind === 'in' ? 'IN' : 'OUT'}</b>
+      <label>Name <input type="text" data-k="name" value="${esc(p.name)}" maxlength="60" placeholder="${p.kind === 'in' ? 'e.g. Board talkback' : 'e.g. Comms to board'}"></label>
+      <label>Audio interface <select data-k="device">
+        <option value="">${devs ? (options.length ? 'Choose…' : 'No interfaces found') : 'Start the engine to list interfaces'}</option>
+        ${p.device && !known ? `<option selected>${esc(p.device)}</option>` : ''}
+        ${options.map((d) => `<option ${d.label === p.device ? 'selected' : ''}>${esc(d.label)}</option>`).join('')}</select></label>
+      <label>${p.kind === 'in' ? 'Input' : 'Output'} # <input type="number" data-k="deviceChannel" min="1" max="64" value="${p.deviceChannel || 1}"></label>
+      <div class="aio-chans"><span class="muted small">${p.kind === 'in' ? 'Goes into' : 'Sends'}:</span>
+        ${state.channels.map((c) => `<label class="chip"><input type="checkbox" data-ch="${esc(c.id)}" ${(p.channels || []).includes(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}</div>
+      <div class="aio-end">${status}<button class="btn small danger" data-del aria-label="Remove">✕</button></div>
+    </div>`;
+  };
+  setHTML($('audio'), `<p class="muted small">Plug an audio interface into the <b>dashboard computer</b> (where the comms engine runs) and wire it to your sound board.
+      <b>Audio in</b> brings a board output (talkback mic, program mix, a pastor's mic for the camera ops) into comms channels.
+      <b>Audio out</b> sends comms channels to a board input (to record comms, or put it in someone's in-ears). Each one uses one channel of the interface.</p>
+    ${list.length ? list.map(row).join('') : '<p class="muted">No audio in or out yet.</p>'}
+    <div class="row-btns" id="aio-btns">${audioButtons()}</div>`);
+}
+const audioButtons = () => `<button class="btn small" data-add="in">+ Audio in (from the board)</button>
+  <button class="btn small" data-add="out">+ Audio out (to the board)</button>
+  ${audioDraft ? '<button class="btn small primary" data-save>Save</button><button class="btn small" data-cancel>Cancel</button>' : ''}`;
+$('audio').addEventListener('input', (e) => {
+  const r = e.target.closest('[data-i]');
+  if (!r) return;
+  audioDraft ||= structuredClone(state.ports || []);
+  const p = audioDraft[r.dataset.i];
+  if (e.target.dataset.k) p[e.target.dataset.k] = e.target.dataset.k === 'deviceChannel' ? Number(e.target.value) : e.target.value;
+  if (e.target.dataset.ch) p.channels = [...r.querySelectorAll('[data-ch]:checked')].map((x) => x.dataset.ch);
+  if (!$('audio').querySelector('[data-save]')) $('aio-btns').innerHTML = audioButtons(); // keep the cursor where it is
+});
+$('audio').addEventListener('click', (e) => {
+  const add = e.target.closest('[data-add]');
+  if (add) {
+    audioDraft ||= structuredClone(state.ports || []);
+    const kind = add.dataset.add;
+    const n = audioDraft.filter((p) => p.kind === kind).length + 1;
+    audioDraft.push({ id: `${kind}-${Date.now().toString(36)}`, name: kind === 'in' ? `Board in ${n}` : `Comms out ${n}`, kind, device: '', deviceChannel: n, channels: [] });
+    renderAudio();
+  }
+  if (e.target.closest('[data-del]')) {
+    audioDraft ||= structuredClone(state.ports || []);
+    audioDraft.splice(Number(e.target.closest('[data-i]').dataset.i), 1);
+    renderAudio();
+  }
+  if (e.target.closest('[data-cancel]')) { audioDraft = null; renderAudio(); }
+  if (e.target.closest('[data-save]')) {
+    if (audioDraft.some((p) => !p.device)) { toast('Pick an audio interface for each one (start the comms engine to list them)', true); return; }
+    send({ t: 'ports', ports: audioDraft });
+    audioDraft = null;
+    toast('Saved. The comms engine opens them now.');
+  }
 });
 
 function renderPositions() {

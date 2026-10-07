@@ -113,15 +113,50 @@ function connect() {
 // ---------------------------------------------------------------- alerts + chime
 
 const seenCritical = new Set();
+/** Alerts that aren't snoozed (snoozed ones come back by themselves). */
+export const activeAlerts = () => store.alerts.filter((a) => !a.snoozedUntil);
+
 function setAlerts(alerts) {
-  const fresh = alerts.filter((a) => a.level === 'critical' && !seenCritical.has(a.key));
+  // Chime for new critical alerts, including ones coming back from a snooze.
+  const active = alerts.filter((a) => !a.snoozedUntil);
+  const fresh = active.filter((a) => a.level === 'critical' && !seenCritical.has(a.key));
   if (fresh.length && store.alerts !== undefined && store.config?.alerts?.sound && store.connected) chime();
   seenCritical.clear();
-  alerts.filter((a) => a.level === 'critical').forEach((a) => seenCritical.add(a.key));
+  active.filter((a) => a.level === 'critical').forEach((a) => seenCritical.add(a.key));
   store.alerts = alerts;
   const bar = document.querySelector('.alertbar');
-  if (bar) bar.innerHTML = alerts.map((a) => `<span class="alert ${a.level}">${esc(a.text)}</span>`).join('');
+  if (bar) bar.innerHTML = alertChips(alerts);
 }
+
+/**
+ * Alert chips with a 💤 button (snooze 10 minutes for every screen), plus one chip listing what's
+ * snoozed (click to bring them back now). Used by the alert bar, Home and the alerts widget.
+ */
+export function alertChips(alerts = store.alerts, { empty = '' } = {}) {
+  const canSnooze = can('crew') && !document.body.classList.contains('kiosk');
+  const active = alerts.filter((a) => !a.snoozedUntil);
+  const snoozed = alerts.filter((a) => a.snoozedUntil);
+  const mins = (a) => Math.max(1, Math.ceil((new Date(a.snoozedUntil) - Date.now()) / 60000));
+  const chips = active.map((a) => `<span class="alert ${a.level}">${esc(a.text)}${canSnooze ? `<button class="alert-snooze" data-snooze="${esc(a.key)}" title="Snooze 10 minutes on every screen (it comes back by itself)" >💤 Snooze</button>` : ''}</span>`);
+  if (snoozed.length) {
+    chips.push(`<button class="alert snoozed" ${canSnooze ? 'data-wake-all' : ''} title="${esc(snoozed.map((a) => `${a.text} (back in ${mins(a)} min)`).join('\n'))}${canSnooze ? '\nClick to bring them back now' : ''}">💤 ${snoozed.length} snoozed · back in ${Math.min(...snoozed.map(mins))} min</button>`);
+  }
+  return chips.join('') || empty;
+}
+
+// Keep "back in N min" current in the alert bar.
+setInterval(() => { const bar = document.querySelector('.alertbar'); if (bar && store.alerts.some((a) => a.snoozedUntil)) bar.innerHTML = alertChips(store.alerts); }, 30000);
+
+document.addEventListener('click', async (e) => {
+  const s = e.target.closest('[data-snooze]');
+  const w = e.target.closest('[data-wake-all]');
+  if (!s && !w) return;
+  e.preventDefault();
+  try {
+    if (s) { await api('POST', '/api/alerts/snooze', { key: s.dataset.snooze, minutes: 10 }); toast('Snoozed for 10 minutes on every screen'); }
+    else for (const a of store.alerts.filter((x) => x.snoozedUntil)) await api('POST', '/api/alerts/snooze', { key: a.key, minutes: 0 });
+  } catch (err) { toast(err.message, true); }
+});
 
 let audioCtx;
 function chime() {
@@ -151,6 +186,7 @@ function applyTheme(cfg) {
 
 /** Small line icons (24px grid) for the menu and pages. */
 export const ICONS = {
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
   menu: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>',
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
@@ -175,7 +211,7 @@ export function can(role) {
   if (!a?.enabled) return true;
   return (RANKS[a.role] || 0) >= RANKS[role];
 }
-const PAGE_ROLE = { gear: 'admin', settings: 'admin', welcome: 'admin', admin: 'producer', schedule: 'producer' };
+const PAGE_ROLE = { gear: 'admin', settings: 'admin', welcome: 'admin', admin: 'producer', schedule: 'producer', people: 'producer' };
 // Comms control also opens for comms leads on their phones (checked by the comms server), so it's only hidden from the menu.
 const NAV_ROLE = { ...PAGE_ROLE, comms: 'producer' };
 
@@ -186,7 +222,8 @@ export const NAV = [
   ['/rf', 'RF', 'rf', 'rf'],
   ['/gear', 'Gear', 'gear', 'plug'],
   ['/schedule', 'Schedule', 'schedule', 'calendar'],
-  ['/admin', 'Service & People', 'admin', 'list'],
+  ['/admin', 'Live service', 'admin', 'list'],
+  ['/people', 'People', 'people', 'users'],
   ['/comms/control', 'Comms', 'comms', 'headset'],
   ['/settings', 'Settings', 'settings', 'settings'],
 ];
@@ -229,11 +266,11 @@ function renderHeader(page) {
     const sw = e.target.closest('[data-org]');
     if (sw && sw.dataset.org !== cfg.orgId) {
       const name = cfg.orgs.find((o) => o.id === sw.dataset.org)?.name;
-      if (!confirm(`Switch to ${name}?\n\nEvery screen will change to ${name}'s gear, people and dashboards.`)) return;
+      if (!await confirmBox(`Every screen will change to ${name}'s gear, people and dashboards.`, { title: `Switch to ${name}?`, ok: 'Switch', danger: false })) return;
       try { await api('POST', '/api/orgs/active', { id: sw.dataset.org }); } catch (err) { toast(err.message, true); }
     }
     if (e.target.closest('[data-org-add]')) {
-      const name = prompt('Name of the new organization (e.g. "Acme Productions")');
+      const name = await askText('Name', '', { title: 'New organization', ok: 'Add' });
       if (!name?.trim()) return;
       try { await api('POST', '/api/orgs', { name: name.trim() }); } catch (err) { toast(err.message, true); }
     }
@@ -256,7 +293,7 @@ const PHONE_MAIN = ['home', 'dash', 'greenroom', 'schedule'];
  */
 function renderRail(page) {
   const items = NAV.filter(([, , id]) => !NAV_ROLE[id] || can(NAV_ROLE[id]));
-  const link = ([href, label, id, ic]) => `<a href="${href}" class="${id === page ? 'active' : ''} ${PHONE_MAIN.includes(id) ? 'main' : ''}" title="${label}" aria-label="${label}">${icon(ic)}<span>${label}</span></a>`;
+  const link = ([href, label, id, ic]) => `<a href="${href}" data-nav="${id}" class="${id === page ? 'active' : ''} ${PHONE_MAIN.includes(id) ? 'main' : ''}" title="${label}" aria-label="${label}">${icon(ic)}<span>${label}</span></a>`;
   const rail = document.createElement('nav');
   rail.className = 'rail';
   rail.setAttribute('aria-label', 'Pages');
@@ -280,6 +317,25 @@ function renderRail(page) {
   const more = rail.querySelector('.rail-more');
   more.onclick = (e) => { e.stopPropagation(); const v = !rail.classList.contains('more-open'); rail.classList.toggle('more-open', v); more.setAttribute('aria-expanded', String(v)); };
   document.addEventListener('click', (e) => { if (!rail.contains(e.target)) rail.classList.remove('more-open'); });
+
+  // Problem dots: Gear when something is offline, Green Room when a mic needs attention.
+  const MIC_ALERT = /^(tx|batt|rf|int|mute):/;
+  const worst = (list) => (list.some((a) => a.level === 'critical') ? 'critical' : list.length ? 'warning' : '');
+  onRender(() => {
+    const active = activeAlerts();
+    const dots = {
+      gear: worst(active.filter((a) => /^(rx|pp|sw|ftb):/.test(a.key))),
+      greenroom: worst(active.filter((a) => MIC_ALERT.test(a.key))),
+    };
+    for (const a of rail.querySelectorAll('[data-nav]')) {
+      const d = dots[a.dataset.nav] || '';
+      if ((a.dataset.dot || '') !== d) { if (d) a.dataset.dot = d; else delete a.dataset.dot; }
+    }
+    // Phone "More" carries a dot when a page inside it has one.
+    const hidden = [...rail.querySelectorAll('[data-nav]:not(.main)')].map((a) => a.dataset.dot).filter(Boolean);
+    const md = hidden.includes('critical') ? 'critical' : hidden[0] || '';
+    if (md) more.dataset.dot = md; else delete more.dataset.dot;
+  });
 }
 
 function accountChip() {
@@ -308,10 +364,12 @@ document.addEventListener('click', async (e) => {
     location.href = '/login';
   }
   if (act === 'password') {
-    const current = prompt('Your current password');
-    if (current == null) return;
-    const next = prompt('New password (at least 8 characters)');
-    if (!next) return;
+    const r = await ask({ title: 'Change password', ok: 'Change password', fields: [
+      { name: 'current', label: 'Current password', type: 'password', required: true },
+      { name: 'next', label: 'New password (at least 8 characters)', type: 'password', required: true },
+    ] });
+    if (!r) return;
+    const { current, next } = r;
     try { await api('POST', '/api/auth/password', { current, next }); toast('Password changed'); } catch (err) { toast(err.message, true); }
   }
 });
@@ -411,7 +469,7 @@ export function micView(slot) {
   const a = store.greenroom.assignments[slot.id] || null;
   const person = a ? store.greenroom.people.find((p) => p.id === a.personId) : null;
   const txOn = Boolean(mic.txType) || (mic.rfDbm != null && mic.rfDbm > -110);
-  const alerting = store.alerts.some((al) => al.key.endsWith(`:${slot.id}`) && al.level !== 'warning');
+  const alerting = activeAlerts().some((al) => al.key.endsWith(`:${slot.id}`) && al.level !== 'warning');
   return { slot, mic, a, person, txOn, alerting };
 }
 
@@ -488,7 +546,7 @@ export async function api(method, url, body) {
     await new Promise(() => {});
   }
   if (res.status === 401) {
-    const entered = prompt('Enter the admin PIN');
+    const entered = await askText('Admin PIN', '', { title: 'This needs the admin PIN', type: 'password' });
     if (entered == null) throw new Error('PIN required');
     localStorage.setItem('wavs-pin', entered);
     return api(method, url, body);
@@ -496,6 +554,60 @@ export async function api(method, url, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
+}
+
+// ---------------------------------------------------------------- in-page dialogs
+// Instead of the browser's prompt() / confirm() boxes: styled, work well on phones and tablets,
+// and can ask for several things at once.
+
+/**
+ * A small form. fields: [{ name, label, value, placeholder, type ('text' | 'password' | 'textarea'
+ * | 'select'), options: [[value, label]], required }]. Resolves to { name: value } or null (cancelled).
+ */
+export function ask({ title, message = '', fields = [], ok = 'Save', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dlg ask-dlg';
+    const field = (f) => {
+      const attrs = `name="${esc(f.name)}" ${f.required ? 'required' : ''} placeholder="${esc(f.placeholder || '')}" ${f.maxlength ? `maxlength="${f.maxlength}"` : ''}`;
+      const input = f.type === 'textarea' ? `<textarea ${attrs} rows="${f.rows || 4}">${esc(f.value ?? '')}</textarea>`
+        : f.type === 'select' ? `<select ${attrs}>${(f.options || []).map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(f.value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
+          : `<input type="${f.type || 'text'}" ${attrs} value="${esc(f.value ?? '')}" ${f.readonly ? 'readonly' : ''}>`;
+      return `<label>${esc(f.label || '')}${input}</label>`;
+    };
+    dlg.innerHTML = `<form method="dialog">
+      ${title ? `<h3>${esc(title)}</h3>` : ''}
+      ${message ? `<p class="ask-msg">${esc(message)}</p>` : ''}
+      ${fields.length ? `<div class="dlg-fields">${fields.map(field).join('')}</div>` : ''}
+      <div class="ask-btns"><button value="cancel" class="btn" formnovalidate>Cancel</button><button value="ok" class="btn ${danger ? 'danger-fill' : 'primary'}">${esc(ok)}</button></div>
+    </form>`;
+    document.body.append(dlg);
+    const form = dlg.querySelector('form');
+    let result = null;
+    form.addEventListener('submit', (e) => {
+      if (e.submitter?.value !== 'ok') return;
+      result = Object.fromEntries(fields.map((f) => [f.name, form.elements[f.name].value]));
+    });
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(result); });
+    dlg.showModal();
+    const first = form.querySelector('input:not([readonly]), textarea, select');
+    if (first) { first.focus(); first.select?.(); }
+  });
+}
+
+/** Like prompt(): one text box; resolves to the text, or null if cancelled. */
+export async function askText(label, value = '', { title = '', ok = 'OK', type = 'text' } = {}) {
+  const r = await ask({ title, fields: [{ name: 'v', label, value, type }], ok });
+  return r ? r.v : null;
+}
+
+/** Like confirm(): resolves true / false. danger: a red button for things that delete or end. */
+export async function confirmBox(message, { title = '', ok, danger } = {}) {
+  const verb = `${title} ${message}`.match(/\b(delete|remove|clear|stop|end|undo|sign \w+ out)\b/i)?.[1];
+  const destructive = danger ?? Boolean(verb && !/^undo$/i.test(verb));
+  const label = ok || (verb ? verb[0].toUpperCase() + verb.slice(1).toLowerCase() : 'OK');
+  const r = await ask({ title, message, ok: label, danger: destructive });
+  return Boolean(r);
 }
 
 /** Set innerHTML only when it changed (keeps focus, scroll and animations intact). */

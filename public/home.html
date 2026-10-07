@@ -9,12 +9,14 @@
 <body>
   <main class="page home">
     <section class="home-hero" id="hero"></section>
+    <section class="panel home-check hidden" id="check"></section>
     <section class="panel home-sched hidden" id="sched"></section>
+    <nav class="home-phone" id="phone-actions" aria-label="Quick actions"></nav>
     <div class="home-grid">
-      <section class="panel"><h2>Dashboards</h2><div class="panel-body htiles" id="dashes"></div></section>
-      <section class="panel"><h2>Gear</h2><div class="panel-body" id="gear"></div></section>
-      <section class="panel"><h2>Alerts</h2><div class="panel-body list" id="alerts"></div></section>
-      <section class="panel"><h2>Quick links</h2><div class="panel-body htiles" id="links"></div></section>
+      <section class="panel home-alerts"><h2>Alerts</h2><div class="panel-body list" id="alerts"></div></section>
+      <section class="panel home-dashes"><h2>Dashboards</h2><div class="panel-body htiles" id="dashes"></div></section>
+      <section class="panel home-gear"><h2>Gear</h2><div class="panel-body" id="gear"></div></section>
+      <section class="panel home-links"><h2>Quick links</h2><div class="panel-body htiles" id="links"></div></section>
     </div>
   </main>
   <script type="module" src="/js/home.js"></script>

@@ -386,6 +386,8 @@ app.put('/api/people/:id/face', need('producer'), wrap((req, res) => {
 }));
 app.delete('/api/people/:id', need('producer'), wrap((req, res) => { rt.store.removePerson(req.params.id); res.json({ ok: true }); }));
 
+// Alerts: snooze one for everyone for a few minutes (it comes back by itself), or wake it.
+app.post('/api/alerts/snooze', need('crew'), wrap((req, res) => { rt.snooze(String(req.body?.key || ''), req.body?.minutes ?? 10); res.json({ ok: true }); }));
 app.put('/api/assignments/:micId', need('crew'), wrap((req, res) => {
   if (!rt.micSlots.some((m) => m.id === req.params.micId)) throw new Error('Unknown mic');
   const result = rt.store.assign(req.params.micId, req.body || {});
@@ -542,7 +544,7 @@ app.get('/api/comms/qr.svg', wrap(async (req, res) => {
 const pub = path.join(ROOT, 'public');
 const pages = {
   '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html', '/tv/:org/:dash': 'dashboard.html',
-  '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/schedule': 'schedule.html', '/gear': 'gear.html', '/settings': 'settings.html',
+  '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/people': 'people.html', '/schedule': 'schedule.html', '/gear': 'gear.html', '/settings': 'settings.html',
   '/comms': 'comms.html', '/comms/control': 'comms-control.html', '/comms/engine': 'comms-engine.html',
   '/login': 'login.html', '/join/:code': 'login.html',
 };

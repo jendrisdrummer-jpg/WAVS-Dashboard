@@ -94,7 +94,8 @@ export class Comms extends EventEmitter {
       members: this.data.members.map(({ token, passcode, ...m }) => ({ ...m, hasCode: Boolean(passcode), signedIn: Boolean(token), online: this.online(m.id), talking: this.talking[m.id] || {}, ...this.link(m.id) })),
       ports: this.data.ports,
       access: { rosterOnly: this.data.access.rosterOnly, hasTeamPassword: Boolean(this.data.access.teamPassword) },
-      engine: { online: Boolean(this.engine) },
+      // devices: audio interfaces the engine computer sees (for picking audio in / out on the Comms page)
+      engine: { online: Boolean(this.engine), devices: this.engine ? this.engineDevices || null : null, portErrors: this.engine ? this.portErrors || {} : {} },
       cues: this.cues,
     };
   }
@@ -184,6 +185,17 @@ export class Comms extends EventEmitter {
           for (const s of this.sockets) if (this.canControl(s) && s.readyState === 1) s.send(out);
         }
         return;
+      case 'devices': // engine: the audio interfaces it can use, [{ label, channels }]
+        if (ws !== this.engine) return;
+        this.engineDevices = {
+          in: (msg.devices?.in || []).slice(0, 40).map((d) => ({ label: str(d.label, 120), channels: Number(d.channels) || null })),
+          out: (msg.devices?.out || []).slice(0, 40).map((d) => ({ label: str(d.label, 120), channels: Number(d.channels) || null })),
+        };
+        return this.changed();
+      case 'port-status': // engine: what went wrong opening each audio in / out
+        if (ws !== this.engine) return;
+        this.portErrors = Object.fromEntries(Object.entries(msg.errors || {}).slice(0, 16).map(([k, v]) => [str(k, 60), str(v, 200)]));
+        return this.changed();
       case 'ports':
         if (ws !== this.engine && !this.canControl(ws)) throw new Error('Not allowed');
         this.data.ports = (msg.ports || []).slice(0, 16).map((pt) => ({
