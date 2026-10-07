@@ -8,7 +8,7 @@
 // Every part (photo, role, battery, status, mic label, details, levels, hand-off buttons) can be
 // switched on or off, and the list can be filtered and sorted. See MIC_OPTIONS.
 import {
-  store, esc, setHTML, micView, battery, battLevel, photoUrl, initials, rfPct, audioPct,
+  store, esc, setHTML, micView, battery, battLevel, photoUrl, faceAttr, initials, rfPct, audioPct,
   meterRows, applyMeters, STATUS_LABEL, KIND_ICON, api, toast,
 } from './common.js';
 
@@ -166,8 +166,8 @@ export function mountMicView(el, options = {}, { getSlots } = {}) {
     const label = o.micLabel ? `<span class="mv-mic">${KIND_ICON[slot.kind] || ''} ${esc(slot.label)}</span>` : '';
     const flag = state === 'alert' ? `<span class="mv-flag">${!mic.online ? 'RECEIVER OFFLINE' : !v.txOn ? 'NO SIGNAL' : 'CHECK MIC'}</span>` : '';
     const glow = 'radial-gradient(circle at 50% 45%, var(--c), transparent 75%)';
-    const photoBox = (cls) => `<div class="${cls}" style="background-image:${url ? `url('${url}'), ` : ''}${glow}">${url ? '' : `<span class="mv-initials">${esc(person ? initials(person.name) : KIND_ICON[slot.kind] || '🎤')}</span>`}`;
-    const avatar = o.photo ? `<div class="mv-avatar" style="${url ? `background-image:url('${url}')` : ''}">${url ? '' : esc(person ? initials(person.name) : '—')}</div>` : '';
+    const photoBox = (cls) => `<div class="${cls}"${url ? faceAttr(person, { glow: true }) : ''} style="background-image:${url ? `url('${url}'), ` : ''}${glow}">${url ? '' : `<span class="mv-initials">${esc(person ? initials(person.name) : KIND_ICON[slot.kind] || '🎤')}</span>`}`;
+    const avatar = o.photo ? `<div class="mv-avatar"${url ? faceAttr(person) : ''} style="${url ? `background-image:url('${url}')` : ''}">${url ? '' : esc(person ? initials(person.name) : '—')}</div>` : '';
     const nameBlock = `<b class="mv-first">${esc(first)}</b>${o.role ? `<span class="mv-sub">${esc(sub)}</span>` : ''}`;
 
     switch (o.layout) {

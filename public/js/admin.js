@@ -1,5 +1,6 @@
-import { start, store, onRender, esc, avatar, micView, api, toast, STATUS_LABEL, KIND_ICON, battery } from './common.js';
+import { start, store, onRender, esc, avatar, micView, api, toast, STATUS_LABEL, KIND_ICON, battery, fitFace, photoUrl } from './common.js';
 import { colorFor } from './micviews.js';
+import { findFace, scanFaces } from './faces.js';
 import { planSource } from './plan.js';
 
 await start({ page: 'admin' });
@@ -115,6 +116,8 @@ peopleEl.addEventListener('click', async (e) => {
       fd.set('name', name);
       fd.set('role', role);
       await api('PUT', `/api/people/${id}`, fd);
+    } else if (btn.dataset.act === 'face') {
+      adjustFace(person);
     } else if (btn.dataset.act === 'remove-photo') {
       const fd = new FormData();
       fd.set('removePhoto', 'true');
@@ -140,6 +143,83 @@ peopleEl.addEventListener('change', async (e) => {
 });
 
 search.oninput = () => { lastPeople = ''; render(); };
+
+// ---------------------------------------------------------------- face position (photo crops)
+
+/**
+ * Show where the face is and let a person move / resize it, with the circle, square and tall
+ * card previews updating live. Saved as "manual", so automatic passes never change it.
+ */
+async function adjustFace(person) {
+  const url = photoUrl(person);
+  const f0 = person.face?.photo === person.photo ? person.face : null;
+  const img = await new Promise((resolve) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = () => resolve(null); i.src = url; });
+  if (!img) { toast("Couldn't open the photo", true); return; }
+  const ar = img.naturalWidth / img.naturalHeight;
+  let face = f0 && !f0.none ? { x: f0.x, y: f0.y, s: f0.s } : { x: 0.5, y: 0.3, s: 0.25 };
+
+  const dlg = document.createElement('dialog');
+  dlg.className = 'dlg face-dlg';
+  dlg.innerHTML = `<form method="dialog">
+    <h3>${esc(person.name)}: face position</h3>
+    <p class="muted small" style="margin:0">Drag the circle onto their face and set its size. The previews show how each card shape will look.
+      ${f0?.none ? '<br><b>No face was found automatically in this photo.</b>' : ''}</p>
+    <div class="face-edit">
+      <div class="face-src" style="aspect-ratio:${ar};width:min(100%, ${(52 * ar).toFixed(1)}vh)"><img src="${esc(url)}" alt=""><i class="face-ring"></i></div>
+      <div class="face-previews">
+        <div><div class="fp fp-circle" style="background-image:url('${esc(url)}')"></div><small>Circle</small></div>
+        <div><div class="fp fp-square" style="background-image:url('${esc(url)}')"></div><small>Tile</small></div>
+        <div><div class="fp fp-tall" style="background-image:url('${esc(url)}')"></div><small>Tall strip</small></div>
+      </div>
+    </div>
+    <label class="small">Face size <input type="range" min="0.03" max="0.9" step="0.005" value="${face.s}" data-size style="width:100%"></label>
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn small" data-auto>Find face again</button>
+      <span style="display:flex;gap:8px"><button value="cancel" class="btn">Cancel</button><button value="save" class="btn primary">Save</button></span>
+    </div>
+  </form>`;
+  document.body.append(dlg);
+  const src = dlg.querySelector('.face-src');
+  const ring = dlg.querySelector('.face-ring');
+  const size = dlg.querySelector('[data-size]');
+  const previews = [...dlg.querySelectorAll('.fp')];
+  const draw = () => {
+    ring.style.left = `${face.x * 100}%`;
+    ring.style.top = `${face.y * 100}%`;
+    ring.style.height = `${face.s * 100}%`;
+    for (const el of previews) { el.dataset.face = `${face.x},${face.y},${face.s},${ar}`; fitFace(el); }
+  };
+  const moveTo = (e) => {
+    const r = src.getBoundingClientRect();
+    face.x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    face.y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    draw();
+  };
+  src.onpointerdown = (e) => { src.setPointerCapture(e.pointerId); moveTo(e); src.onpointermove = moveTo; };
+  src.onpointerup = () => { src.onpointermove = null; };
+  size.oninput = () => { face.s = Number(size.value); draw(); };
+  dlg.querySelector('[data-auto]').onclick = async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = 'Looking…';
+    try {
+      const found = await findFace(url);
+      if (found.none) toast('No face found. Drag the circle onto it instead.', true);
+      else { face = { x: found.x, y: found.y, s: found.s }; size.value = face.s; draw(); }
+    } catch (err) { toast(err.message, true); }
+    e.target.disabled = false;
+    e.target.textContent = 'Find face again';
+  };
+  dlg.onclose = async () => {
+    dlg.remove();
+    if (dlg.returnValue !== 'save') return;
+    try {
+      await api('PUT', `/api/people/${person.id}/face`, { photo: person.photo, face: { ...face, ar }, manual: true });
+      toast('Face position saved');
+    } catch (err) { toast(err.message, true); }
+  };
+  dlg.showModal();
+  requestAnimationFrame(draw);
+}
 
 // ---------------------------------------------------------------- assignments
 
@@ -189,11 +269,13 @@ function render() {
         <label class="btn small" style="cursor:pointer">📷 Photo<input type="file" accept="image/*" data-id="${p.id}" hidden></label>
         <label class="btn small swatch" title="Colour behind their photo on the mic board"><input type="color" data-color="${p.id}" value="${colorFor(p, { id: p.id })}"></label>
         <button class="btn small" data-act="edit" data-id="${p.id}">Edit</button>
+        ${p.photo ? `<button class="btn small" data-act="face" data-id="${p.id}" title="Where their face is, so it stays in frame on every card shape">🎯 Adjust</button>` : ''}
         ${p.photo ? `<button class="btn small" data-act="remove-photo" data-id="${p.id}">No photo</button>` : ''}
         <button class="btn small danger" data-act="delete" data-id="${p.id}">Remove</button>
       </div>
     </div>`).join('') || `<div class="muted">${g.people.length ? 'No matches.' : 'No people yet – add your worship team, hosts and guests above.'}</div>`;
   if (ph !== lastPeople) { lastPeople = ph; peopleEl.innerHTML = ph; }
+  if (store.connected) scanFaces(g.people);
 
   const options = [...g.people].sort((a, b) => a.name.localeCompare(b.name));
   const ah = store.slots.map((slot) => {

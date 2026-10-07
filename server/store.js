@@ -50,9 +50,35 @@ export class GreenroomStore extends EventEmitter {
     for (const k of ['name', 'role', 'notes']) if (typeof fields[k] === 'string') p[k] = fields[k].trim();
     if (typeof fields.color === 'string') p.color = cleanColor(fields.color);
     if (fields.photo !== undefined) {
-      if (p.photo && p.photo !== fields.photo) this.deletePhoto(p.photo);
+      if (p.photo && p.photo !== fields.photo) { this.deletePhoto(p.photo); delete p.face; }
       p.photo = fields.photo;
     }
+    this.save();
+    return p;
+  }
+
+  /**
+   * Where the face is in a person's photo, so every card shape (tall strips, squares, small
+   * circles) can keep it in frame. Found in the browser when a photo is added, or set by hand.
+   * { x, y } face centre and s face height, as fractions of the photo; ar = photo width / height.
+   * { none: true } = no face found (crop as before). by: 'auto' | 'manual' (manual is never
+   * replaced by an automatic pass). Ignored if the photo changed since it was measured.
+   */
+  setFace(id, { photo, face, manual = false } = {}) {
+    const p = this.person(id);
+    if (!p) throw new Error('Person not found');
+    if (!p.photo || photo !== p.photo) return p; // measured an old photo
+    if (face === null) { delete p.face; this.save(); return p; }
+    if (!manual && p.face?.by === 'manual') return p;
+    const num = (v, lo, hi) => {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < lo || n > hi) throw new Error('Face position is out of range');
+      return Math.round(n * 10000) / 10000;
+    };
+    const ar = num(face?.ar, 0.05, 20);
+    p.face = face?.none
+      ? { photo, none: true, ar, by: manual ? 'manual' : 'auto' }
+      : { photo, x: num(face?.x, 0, 1), y: num(face?.y, 0, 1), s: num(face?.s, 0.01, 1), ar, by: manual ? 'manual' : 'auto' };
     this.save();
     return p;
   }

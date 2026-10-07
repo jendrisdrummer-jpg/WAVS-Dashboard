@@ -51,6 +51,7 @@ export async function start({ page }) {
   // ?kiosk=1 (and TV links, /tv/...) hide the header (TVs, confidence monitors); alerts stay visible.
   if (new URLSearchParams(location.search).get('kiosk') === '1' || location.pathname.startsWith('/tv/')) document.body.classList.add('kiosk');
   renderHeader(page);
+  watchFaces();
   connect();
   setInterval(tickClock, 1000);
   tickClock();
@@ -298,7 +299,60 @@ export function photoUrl(person) {
 
 export function avatar(person, cls = 'avatar') {
   const url = photoUrl(person);
-  return `<div class="${cls}" style="${url ? `background-image:url('${url}')` : ''}">${url ? '' : esc(person ? initials(person.name) : '—')}</div>`;
+  return `<div class="${cls}"${faceAttr(person)} style="${url ? `background-image:url('${url}')` : ''}">${url ? '' : esc(person ? initials(person.name) : '—')}</div>`;
+}
+
+/**
+ * Keep faces in frame: an element showing a person's photo as its background gets
+ * data-face="x,y,s,ar" (from faces.js), and fitFace() places the photo for that element's shape.
+ * glow: the element has a second background layer (the colour glow behind cut-out photos).
+ */
+export function faceAttr(person, { glow = false } = {}) {
+  const f = person?.photo && person.face;
+  if (!f || f.photo !== person.photo || f.none) return '';
+  return ` data-face="${f.x},${f.y},${f.s},${f.ar}"${glow ? ' data-face-glow' : ''}`;
+}
+
+/**
+ * Place the photo so the face sits well in this shape. Small circles and squares zoom in to head
+ * and shoulders; square-ish and wide cards zoom in a little; tall strips keep the whole photo
+ * (as before) and just make sure the face isn't cut off.
+ */
+export function fitFace(el) {
+  const W = el.clientWidth;
+  const H = el.clientHeight;
+  const rest = el.hasAttribute('data-face-glow') ? ', cover' : '';
+  const rest2 = rest ? ', center' : '';
+  if (!W || !H || el.closest('.mv-fit-contain')) { el.style.backgroundSize = ''; el.style.backgroundPosition = ''; return; }
+  const [x, y, s, ar] = el.dataset.face.split(',').map(Number);
+  if (![x, y, s, ar].every(Number.isFinite) || !s || !ar) return;
+  const cover = Math.max(H, W / ar); // photo height when it just fills the element
+  const [faceH, faceY, maxZoom] = W / H < 0.7 ? [0, 0.3, 1] // tall strips
+    : Math.max(W, H) < 160 ? [0.5, 0.47, 5] // avatars and small circles
+      : [0.36, 0.42, 3]; // tiles and cards
+  const h = faceH ? Math.min(Math.max(cover, (H * faceH) / s), cover * maxZoom) : cover;
+  const w = h * ar;
+  const left = Math.min(0, Math.max(W - w, W / 2 - x * w));
+  const top = Math.min(0, Math.max(H - h, H * faceY - y * h));
+  el.style.backgroundSize = `${w.toFixed(1)}px ${h.toFixed(1)}px${rest}`;
+  el.style.backgroundPosition = `${left.toFixed(1)}px ${top.toFixed(1)}px${rest2}`;
+}
+
+let faceSizes = null;
+function watchFaces() {
+  faceSizes = new ResizeObserver((entries) => { for (const e of entries) fitFace(e.target); });
+  const each = (node, fn) => {
+    if (node.nodeType !== 1) return;
+    if (node.hasAttribute('data-face')) fn(node);
+    for (const el of node.querySelectorAll('[data-face]')) fn(el);
+  };
+  new MutationObserver((changes) => {
+    for (const c of changes) {
+      for (const n of c.removedNodes) each(n, (el) => faceSizes.unobserve(el));
+      for (const n of c.addedNodes) each(n, (el) => faceSizes.observe(el));
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+  each(document.body, (el) => faceSizes.observe(el));
 }
 
 /** Everything about one mic slot: static config, live receiver data, assignment and person. */

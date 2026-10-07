@@ -147,6 +147,14 @@ The **Green Room TV** dashboard and `/greenroom` show one column per mic:
 
 Cut-out photos (PNG with a transparent background) look best, because the colour shows around them.
 
+**Faces stay in frame.** When a photo is added, the dashboard finds the face in it, so circles,
+tiles and cards center and zoom in on the face, and tall strips keep the head in view. The first
+time Service & People is opened after updating, every existing photo is checked too. If it picks
+the wrong spot (side profile, sunglasses, a group photo), click **🎯 Adjust** next to the person,
+drag the circle onto their face and set its size; that setting is kept. The face finder runs in
+the browser using a model that comes with the dashboard, so photos never leave your computers and
+it works without internet.
+
 ### Mics & gear: pick a look per dashboard
 The Add widget panel offers ready-made versions:
 
