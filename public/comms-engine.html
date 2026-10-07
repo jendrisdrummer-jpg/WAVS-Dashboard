@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Comms engine</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="page narrow">
+    <div class="page-head"><div><h1>Comms engine</h1><p class="muted">Mixes everyone's comms audio. Keep this tab open on this computer during the event.</p></div>
+      <div class="row-btns"><a class="btn" href="/comms/control">Comms control</a></div></div>
+
+    <section class="panel">
+      <h2>Status</h2>
+      <div class="panel-body">
+        <div id="startbox">
+          <p>Click <b>Start</b> to begin mixing. The browser will ask to use a microphone; that lets phones connect directly over your network (nothing is recorded or sent anywhere else).</p>
+          <button class="btn primary big" id="start">Start comms engine</button>
+          <p class="cx-err" id="err" role="alert"></p>
+        </div>
+        <div id="running" class="hidden">
+          <div class="eng-status"><span class="dev-dot"></span><b id="eng-text">Running</b><small class="muted" id="eng-sub"></small></div>
+          <div class="eng-people" id="people"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Audio interface (e.g. Behringer WING over USB)</h2>
+      <div class="panel-body">
+        <p class="muted small">Inputs bring console audio into comms channels (e.g. talkback into GFX). Outputs send comms channels to interface channels (e.g. into a WING bus). Leave empty when no console is connected.</p>
+        <div id="ports"></div>
+        <div class="row-btns">
+          <button class="btn" type="button" id="add-in">+ Input from console</button>
+          <button class="btn" type="button" id="add-out">+ Output to console</button>
+          <button class="btn primary" type="button" id="save-ports">Save</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/js/comms-engine.js"></script>
+</body>
+</html>

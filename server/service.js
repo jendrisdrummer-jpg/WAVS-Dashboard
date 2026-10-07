@@ -36,16 +36,23 @@ export class ServiceManager extends EventEmitter {
     if (this.saved.source === 'manual' && this.saved.manual) this.plan = this.saved.manual;
     if (this.pco) {
       await this.refreshUpcoming();
+      if (this.stopped) return; // organization switched while Planning Center was loading
       // Nothing chosen yet: follow the next Planning Center plan automatically.
       if (!this.saved.source && this.upcoming[0]) await this.selectPco(this.upcoming[0].serviceTypeId, this.upcoming[0].id, { keepProgress: true });
       else if (this.saved.source === 'pco') await this.reloadPco();
+      if (this.stopped) return;
       this.liveTimer = setInterval(() => this.pollLive(), this.cfg.livePollMs);
       this.planTimer = setInterval(() => { this.reloadPco(); this.refreshUpcoming(); }, this.cfg.planRefreshMs);
     }
     this.emitState();
   }
 
-  stop() { clearInterval(this.liveTimer); clearInterval(this.planTimer); }
+  stop() {
+    this.stopped = true;
+    clearInterval(this.liveTimer);
+    clearInterval(this.planTimer);
+    this.removeAllListeners();
+  }
 
   save() {
     const tmp = `${this.file}.tmp`;
@@ -146,19 +153,63 @@ export class ServiceManager extends EventEmitter {
 
   /** Called when ProPresenter's active presentation changes. */
   onPresentation(name) {
-    if (!this.cfg.followProPresenter || !this.plan || !name) return;
+    if (!this.cfg.followProPresenter || !this.plan || !name) return false;
     const items = this.plan.items.filter((i) => i.type !== 'header');
     const want = normalize(name);
-    if (!want) return;
+    if (!want) return false;
     const idx = this.plan.items.findIndex((i) => i.id === this.saved.current?.itemId);
     const matches = items.filter((i) => {
       const t = normalize(i.title);
       return t && (t === want || (t.length > 3 && want.includes(t)) || (want.length > 3 && t.includes(want)));
     });
-    if (!matches.length) return;
+    if (!matches.length) return false;
     // Prefer the first match at or after the current position (songs can repeat).
     const pick = matches.find((m) => this.plan.items.indexOf(m) >= idx) || matches[0];
     if (pick.id !== this.saved.current?.itemId) this.setCurrent(pick.id, 'propresenter');
+    return true;
+  }
+
+  /**
+   * Called when ProPresenter's active playlist or cued item changes.
+   * - Source "propresenter": the playlist *is* the order of service.
+   * - Planning Center / manual plan: match the cued item by name; if names differ but the
+   *   playlist and plan have the same number of items, follow by position instead.
+   */
+  onPlaylist(pl) {
+    if (!this.cfg.followProPresenter || !pl?.items?.length) return;
+    if (this.saved.source === 'propresenter') {
+      const items = pl.items.map((it, i) => ({
+        id: `${pl.uuid}:${i}`,
+        title: it.name || `Item ${i + 1}`,
+        type: it.type === 'header' ? 'header' : it.type === 'presentation' ? 'item' : 'media',
+        position: 'during',
+        length: 0,
+      }));
+      if (this.saved.planId !== pl.uuid) this.saved = { ...this.saved, planId: pl.uuid, current: null, actuals: {} };
+      const changed = JSON.stringify(items) !== JSON.stringify(this.plan?.items);
+      this.plan = { title: pl.name, seriesTitle: null, dates: null, times: [], items };
+      if (changed) { this.save(); this.emitState(); }
+      const cur = items[pl.index];
+      if (cur && cur.type !== 'header' && cur.id !== this.saved.current?.itemId) this.setCurrent(cur.id, 'propresenter');
+      return;
+    }
+    const cued = pl.items[pl.index];
+    if (!this.plan || !cued) return;
+    if (this.onPresentation(cued.name)) return;
+    const planItems = this.plan.items.filter((i) => i.type !== 'header');
+    const plItems = pl.items.filter((i) => i.type !== 'header');
+    if (planItems.length !== plItems.length) return;
+    const k = plItems.indexOf(cued);
+    if (k >= 0 && planItems[k].id !== this.saved.current?.itemId) this.setCurrent(planItems[k].id, 'propresenter');
+  }
+
+  /** Use ProPresenter's active playlist as the order of service. */
+  useProPresenter() {
+    this.saved = { ...this.saved, source: 'propresenter', serviceTypeId: null, planId: null, current: null, actuals: {} };
+    this.plan = null;
+    this.save();
+    this.emitState();
+    this.emit('planLoaded');
   }
 
   setCurrent(itemId, by = 'manual', startedAt = null) {

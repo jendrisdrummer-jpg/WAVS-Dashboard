@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0b0f17">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Comms</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="cx">
+  <!-- Sign in -->
+  <section class="cx-join hidden" id="join">
+    <div class="cx-brand"><span class="cx-logo" aria-hidden="true">🎧</span><h1 id="join-org">Comms</h1><p class="muted">Sign in to join the team on comms.</p></div>
+    <form class="form cx-form" id="join-form" autocomplete="on">
+      <label class="f"><span>Your name</span><input type="text" name="name" required maxlength="40" autocomplete="name" autocapitalize="words" placeholder="First and last name"></label>
+      <label class="f hidden" id="f-team"><span>Team password</span><input type="password" name="teamPassword" maxlength="40" autocomplete="current-password"></label>
+      <label class="f"><span>Personal code <small class="muted">(only if the producer gave you one)</small></span><input type="password" name="code" maxlength="40" inputmode="text" autocomplete="one-time-code"></label>
+      <label class="f hidden" id="f-pos"><span>Your position</span><select name="position"></select></label>
+      <p class="cx-err" id="join-err" role="alert"></p>
+      <button class="btn primary big">Join comms</button>
+    </form>
+  </section>
+
+  <!-- Tap to start audio (browsers need a tap before they play sound or use the mic) -->
+  <section class="cx-start hidden" id="start">
+    <h1 id="start-name"></h1>
+    <p class="muted" id="start-pos"></p>
+    <button class="btn primary big" id="start-btn">🎧 Start comms</button>
+    <p class="muted small">Plug in headphones. Your phone will ask to use the microphone.</p>
+    <p class="cx-err" id="start-err" role="alert"></p>
+  </section>
+
+  <!-- On comms -->
+  <section class="cx-main hidden" id="main">
+    <header class="cx-top">
+      <div><b id="me-name"></b><small class="muted" id="me-pos"></small></div>
+      <span class="cx-status" id="status">Connecting…</span>
+      <a class="btn small hidden" id="control-link" href="/comms/control">Control</a>
+      <button class="btn small" id="menu-btn" aria-label="More">⋯</button>
+    </header>
+    <div class="cx-menu hidden" id="menu">
+      <button id="latch-mode"></button>
+      <button id="sign-out">Sign out of comms</button>
+    </div>
+    <div class="cx-talkers" id="talkers" aria-live="polite"></div>
+    <div class="cx-channels" id="channels"></div>
+    <p class="cx-hint muted small" id="hint"></p>
+  </section>
+
+  <section class="cx-gone hidden" id="gone"><h1>Signed out</h1><p class="muted" id="gone-why"></p><button class="btn primary big" id="gone-btn">Sign in again</button></section>
+
+  <!-- Cue from the producer -->
+  <div class="cx-cue hidden" id="cue" role="alertdialog" aria-live="assertive">
+    <div class="cx-cue-kind" id="cue-kind"></div>
+    <div class="cx-cue-text" id="cue-text"></div>
+    <button class="btn big" id="cue-ack">Got it</button>
+  </div>
+
+  <audio id="out" autoplay playsinline></audio>
+  <script type="module" src="/js/comms.js"></script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gear</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="page">
+    <div class="page-head">
+      <div>
+        <h1>Gear</h1>
+        <p class="muted" id="summary">Checking connections…</p>
+      </div>
+      <div class="row-btns">
+        <button class="btn" id="reconnect" type="button">Reconnect everything</button>
+      </div>
+    </div>
+    <div id="sections" class="gear-sections"></div>
+  </main>
+
+  <dialog id="dev-dlg" class="dlg">
+    <form method="dialog" id="dev-form">
+      <h3 id="dev-title">Add device</h3>
+      <div id="dev-fields" class="dlg-fields form"></div>
+      <div id="dev-test" class="test-result" aria-live="polite"></div>
+      <div class="dlg-btns">
+        <button class="btn" type="button" id="dev-testbtn">Test connection</button>
+        <span style="flex:1"></span>
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" value="ok">Save</button>
+      </div>
+    </form>
+  </dialog>
+  <script type="module" src="/js/gear.js"></script>
+</body>
+</html>

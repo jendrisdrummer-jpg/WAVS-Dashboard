@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Comms</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="page cc">
+    <div class="page-head"><div><h1>Comms</h1><p class="muted" id="sub">Channels, who can talk to whom, and cues.</p></div>
+      <div class="row-btns"><a class="btn" href="/comms" target="_blank">Open comms on this device</a></div></div>
+
+    <div class="cc-top">
+      <section class="panel"><h2>Comms engine</h2><div class="panel-body" id="engine"></div></section>
+      <section class="panel"><h2>Join from a phone</h2><div class="panel-body cc-join" id="join"></div></section>
+      <section class="panel"><h2>Cue</h2><div class="panel-body" id="cues"></div></section>
+    </div>
+
+    <section class="panel">
+      <h2>People <small class="muted" id="count"></small></h2>
+      <div class="panel-body">
+        <form class="cc-add" id="add-form">
+          <input type="text" name="name" placeholder="Name (as they'll type it)" maxlength="40" required aria-label="Name">
+          <select name="position" aria-label="Position"></select>
+          <input type="text" name="code" placeholder="Personal code (optional)" maxlength="40" aria-label="Personal code" autocomplete="off">
+          <label class="cb lead-only-hide"><input type="checkbox" name="lead"> Lead</label>
+          <button class="btn primary">Add person</button>
+        </form>
+        <p class="muted small">Add your team before the event with their position. They scan the QR code, type their name (and personal code if you gave them one) and land in the right channels.</p>
+        <div class="cc-table-wrap"><table class="cc-table" id="people"></table></div>
+        <p class="muted small cc-legend"><b class="cperm t on">T</b> can talk <b class="cperm l on">L</b> can listen. Click to switch. Changes apply instantly.</p>
+      </div>
+    </section>
+
+    <div class="cc-bottom">
+      <section class="panel lead-only-hide"><h2>Sign-in rules</h2><div class="panel-body form" id="access"></div></section>
+      <section class="panel"><h2>Channels</h2><div class="panel-body" id="channels"></div></section>
+      <section class="panel"><h2>Position defaults</h2><div class="panel-body" id="positions"></div></section>
+    </div>
+  </main>
+  <script type="module" src="/js/comms-control.js"></script>
+</body>
+</html>

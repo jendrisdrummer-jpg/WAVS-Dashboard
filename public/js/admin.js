@@ -1,5 +1,6 @@
 import { start, store, onRender, esc, avatar, micView, api, toast, STATUS_LABEL, KIND_ICON, battery } from './common.js';
 import { colorFor } from './micviews.js';
+import { planSource } from './plan.js';
 
 await start({ page: 'admin' });
 
@@ -36,6 +37,9 @@ manual.onsubmit = async (e) => {
     toast('Plan loaded');
   } catch (err) { toast(err.message, true); }
 };
+document.getElementById('use-pp').onclick = async () => {
+  try { await api('POST', '/api/service/propresenter'); toast('Following the ProPresenter playlist'); } catch (err) { toast(err.message, true); }
+};
 document.getElementById('reset-progress').onclick = async () => {
   if (!confirm('Clear the current item and recorded item times?')) return;
   try { await api('POST', '/api/service/reset'); toast('Progress reset'); } catch (err) { toast(err.message, true); }
@@ -56,7 +60,7 @@ pcoEl.addEventListener('click', async (e) => {
 function renderPlan() {
   const svc = store.service;
   document.getElementById('plan-status').textContent = svc.plan
-    ? `· now using ${svc.source === 'pco' ? 'Planning Center' : 'manual plan'}: ${svc.plan.title || ''} (${svc.plan.items.filter((i) => i.type !== 'header').length} items)`
+    ? `· now using ${planSource(svc)}: ${svc.plan.title || ''} (${svc.plan.items.filter((i) => i.type !== 'header').length} items)`
     : '· no plan loaded';
   if (!manualFilled && svc.source === 'manual' && svc.plan) {
     manual.elements.title.value = svc.plan.title || '';
@@ -65,10 +69,7 @@ function renderPlan() {
     manualFilled = true;
   }
   if (!store.config.planningCenter) {
-    pcoEl.innerHTML = `<p class="muted">Not connected. Create a Personal Access Token at
-      <a href="https://api.planningcenteronline.com/oauth/applications" target="_blank" rel="noopener">api.planningcenteronline.com/oauth/applications</a>
-      and add it to <code>config/config.yaml</code> under <code>planningCenter: { appId, secret }</code>
-      (or set the <code>PCO_APP_ID</code> / <code>PCO_SECRET</code> environment variables), then restart.</p>`;
+    pcoEl.innerHTML = `<p class="muted">Not connected. Add your Planning Center token in <a href="/settings#pco">Settings → Planning Center</a>, or use the ProPresenter playlist or a typed plan below.</p>`;
     return;
   }
   const st = svc.pco || {};

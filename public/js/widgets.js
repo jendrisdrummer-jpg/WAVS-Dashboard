@@ -13,7 +13,7 @@ import {
 } from './common.js';
 import { buildTile } from './video.js';
 import { spacingConflicts, drawSpectrum, rfRows } from './views.js';
-import { planTiming, currentInfo, serviceClock } from './plan.js';
+import { planTiming, currentInfo, serviceClock, planSource } from './plan.js';
 import { mountMicView, MIC_OPTIONS } from './micviews.js';
 
 const switcherChoices = () => [['', '— none —'], ...store.config.switchers.map((s) => [s.id, s.name])];
@@ -217,13 +217,13 @@ export const WIDGETS = {
             return `<button class="pl-i ${isCur ? 'cur' : ''} ${t.done ? 'done' : ''}" data-item="${esc(it.id)}">
               ${opts.compact ? '' : `<span class="pl-t mono">${t.start ? t.start : ''}</span>`}
               <span class="pl-n">${esc(it.title)}${it.key ? ` <span class="chip">${esc(it.key)}</span>` : ''}</span>
-              <span class="pl-l mono">${isCur ? `<b class="${t.remaining < 0 ? 'over' : ''}">${fmtDuration(t.remaining)}</b>` : actual != null ? `<span class="${over ? 'over' : 'ok'}" title="Actual (planned ${fmtDuration(it.length)})">${fmtDuration(actual)}</span>` : it.length ? fmtDuration(it.length) : ''}</span>
+              <span class="pl-l mono">${isCur ? `<b class="${it.length && t.remaining < 0 ? 'over' : ''}">${fmtDuration(it.length ? t.remaining : -t.remaining)}</b>` : actual != null ? `<span class="${over ? 'over' : 'ok'}" title="Actual (planned ${fmtDuration(it.length)})">${fmtDuration(actual)}</span>` : it.length ? fmtDuration(it.length) : ''}</span>
             </button>`;
           }).join('');
           setHTML(body, `<div class="plan ${opts.compact ? 'compact' : ''}">
             <div class="pl-top">
               <div><b>${esc(svc.plan.title || 'Service')}</b>${svc.plan.seriesTitle ? ` <span class="muted">· ${esc(svc.plan.seriesTitle)}</span>` : ''}
-                <div class="muted small">${esc(svc.plan.dates || '')} · ${svc.source === 'pco' ? 'Planning Center' : 'Manual plan'}${svc.current?.by ? ` · following ${esc({ 'pco-live': 'Services LIVE', propresenter: 'ProPresenter', manual: 'operator' }[svc.current.by] || svc.current.by)}` : ''}</div></div>
+                <div class="muted small">${svc.plan.dates ? `${esc(svc.plan.dates)} · ` : ''}${planSource(svc)}${svc.current?.by ? ` · following ${esc({ 'pco-live': 'Services LIVE', propresenter: 'ProPresenter', manual: 'operator' }[svc.current.by] || svc.current.by)}` : ''}</div></div>
               ${opts.controls === false ? '' : '<div class="row-btns"><button class="btn small" data-step="previous" title="Previous item">◀</button><button class="btn small" data-step="next" title="Next item">▶</button></div>'}
             </div>
             <div class="pl-list">${rows}</div></div>`);
@@ -246,7 +246,7 @@ export const WIDGETS = {
           const info = currentInfo(store.service);
           if (!info) return setHTML(body, empty(store.service.plan ? 'Service not started.<br><small>Pick an item in the plan, advance ProPresenter, or start Services LIVE.</small>' : 'No service plan'));
           const pct = info.item.length ? Math.min(100, (info.elapsed / info.item.length) * 100) : 0;
-          setHTML(body, `<div class="ci ${info.remaining < 0 ? 'overrun' : info.remaining < 30 && info.item.length ? 'soon' : ''}">
+          setHTML(body, `<div class="ci ${info.item.length && info.remaining < 0 ? 'overrun' : info.remaining < 30 && info.item.length ? 'soon' : ''}">
             <div class="ci-title">${esc(info.item.title)}${info.item.key ? ` <span class="chip">${esc(info.item.key)}</span>` : ''}</div>
             <div class="ci-time mono">${info.item.length ? fmtDuration(info.remaining) : fmtDuration(info.elapsed)}</div>
             <div class="ci-sub muted">${info.item.length ? (info.remaining < 0 ? 'over time' : 'remaining') : 'elapsed'}</div>
@@ -350,6 +350,26 @@ export const WIDGETS = {
           setHTML(body, store.alerts.length
             ? `<div class="list">${store.alerts.map((a) => `<span class="alert ${a.level}">${esc(a.text)}</span>`).join('')}</div>`
             : '<div class="w-empty ok">✓ All clear</div>');
+        },
+      };
+    },
+  },
+
+  comms: {
+    title: 'Comms', icon: '🎧', category: 'Team', size: { w: 4, h: 3 },
+    options: [{ key: 'offline', label: 'Also show people who are not connected', type: 'checkbox' }],
+    mount(body, opts) {
+      return {
+        update() {
+          const c = store.comms;
+          const people = c.members.filter((m) => m.online || opts.offline);
+          if (!c.members.length) return setHTML(body, '<div class="w-empty">Nobody on comms yet. <a href="/comms/control">Set up comms</a></div>');
+          const rows = c.channels.map((ch) => {
+            const on = people.filter((m) => m.talking.includes(ch.id));
+            return `<div class="cw-ch" style="--ch:${esc(ch.color)}"><b>${esc(ch.name)}</b>${on.map((m) => `<span class="cw-p live">🗣 ${esc(m.name)}</span>`).join('') || '<small class="muted">quiet</small>'}</div>`;
+          }).join('');
+          setHTML(body, `<div class="cw">${c.engine ? '' : '<span class="alert critical">Comms engine is not running</span>'}${rows}
+            <div class="chips">${people.map((m) => `<span class="cw-p ${m.online ? '' : 'muted'}" title="${esc(m.position)}">${m.online ? '●' : '○'} ${esc(m.name)}${m.muted ? ' (muted)' : ''}</span>`).join('')}</div></div>`);
         },
       };
     },

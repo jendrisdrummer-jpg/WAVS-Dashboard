@@ -12,7 +12,13 @@ export class Hub extends EventEmitter {
     super();
     this.state = { receivers: {}, mics: {}, propresenter: {}, switchers: {} };
     this.pendingMeters = {};
-    setInterval(() => this.flushMeters(), 100).unref();
+    this.timer = setInterval(() => this.flushMeters(), 100);
+    this.timer.unref();
+  }
+
+  stop() {
+    clearInterval(this.timer);
+    this.removeAllListeners();
   }
 
   /** Shallow-merge `data` into state[section][id]; emits only when something changed. */

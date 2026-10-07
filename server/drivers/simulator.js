@@ -85,8 +85,18 @@ const SONG = {
   ],
 };
 
+const PLAYLIST = [
+  { name: 'Walk-in Loop', type: 'media' },
+  { name: 'Worship', type: 'header' },
+  { name: 'Great Is Thy Faithfulness', type: 'presentation' },
+  { name: 'Holy Forever', type: 'presentation' },
+  { name: 'Message', type: 'header' },
+  { name: 'Sermon Slides', type: 'presentation' },
+  { name: 'Closing', type: 'presentation' },
+];
+
 export class SimProPresenter {
-  constructor(cfg, hub) { this.cfg = cfg; this.hub = hub; this.i = 0; this.t0 = Date.now(); }
+  constructor(cfg, hub) { this.cfg = cfg; this.hub = hub; this.i = 0; this.t0 = Date.now(); this.pl = 2; }
 
   start() {
     const slides = SONG.groups.flatMap((g) => g.slides);
@@ -100,7 +110,8 @@ export class SimProPresenter {
         online: true,
         error: null,
         version: 'ProPresenter 7 (sim)',
-        presentation: { uuid: 'sim', name: SONG.name, index: this.i },
+        presentation: { uuid: 'sim', name: PLAYLIST[this.pl].name, index: this.i },
+        playlist: { uuid: 'sim-playlist', name: 'Sunday Service', items: PLAYLIST, index: this.pl, itemName: PLAYLIST[this.pl].name },
         slideCount: slides.length,
         groups,
         current: { text: slides[this.i], notes: '' },
@@ -115,7 +126,12 @@ export class SimProPresenter {
       });
     };
     push();
-    this.timer = setInterval(() => { if (Math.random() < 0.25) this.i = (this.i + 1) % slides.length; push(); }, 1000);
+    this.timer = setInterval(() => {
+      if (Math.random() < 0.25) this.i = (this.i + 1) % slides.length;
+      // Move to the next playlist item every ~45 s so the demo plan advances.
+      if (Math.random() < 1 / 45) do { this.pl = (this.pl + 1) % PLAYLIST.length; } while (PLAYLIST[this.pl].type === 'header');
+      push();
+    }, 1000);
   }
 
   async thumbnail() { return null; }

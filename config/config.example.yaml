@@ -1,6 +1,11 @@
-# WAVS Dashboard configuration
-# Copy to config/config.yaml and edit for your building. Restart the server after changes.
-# Any device can use `type: simulator` while you set things up.
+# WAVS Dashboard configuration (optional)
+#
+# You don't need this file any more: gear, branding, PIN and Planning Center are set up in the
+# browser (setup wizard, Gear and Settings pages) and saved per organization in data/orgs/.
+#
+# Use it to change the server port, or to bring an existing setup across: the first time this
+# version starts, everything below is imported into the first organization. After that, changes
+# here (other than server.port) are ignored, so edit in the browser instead.
 
 server:
   port: 8080
