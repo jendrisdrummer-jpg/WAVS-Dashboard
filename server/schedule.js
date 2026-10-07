@@ -177,7 +177,12 @@ export class Schedule extends EventEmitter {
   }
 
   /** Can the live service be undone (put back to how things were before it went live)? */
-  canUndo() { return Boolean(this.data.undo && this.data.undo.serviceId === this.data.liveId); }
+  canUndo() {
+    const u = this.data.undo;
+    if (!u) return false;
+    if (u.cleared) return !this.data.liveId; // "Clear" with nothing live: just puts the plan back
+    return u.ended ? !this.data.liveId && Boolean(this.get(u.serviceId)) : u.serviceId === this.data.liveId;
+  }
 
   /**
    * Undo going live: the service goes back to planned (and won't go live by itself again; use
@@ -187,7 +192,16 @@ export class Schedule extends EventEmitter {
   undoLive() {
     const u = this.data.undo;
     if (!this.canUndo()) throw new Error('Nothing to undo');
+    if (u.cleared) { this.data.undo = null; this.save(); return u; }
     const s = this.get(u.serviceId);
+    if (u.ended) { // "End service" undone: it's live again
+      Object.assign(s, { state: 'live' });
+      delete s.endedAt;
+      this.data.liveId = s.id;
+      this.data.undo = null;
+      this.save();
+      return u;
+    }
     Object.assign(s, { state: 'planned', noAuto: true });
     delete s.liveAt;
     const prev = u.prevLiveId && this.get(u.prevLiveId);
@@ -198,13 +212,13 @@ export class Schedule extends EventEmitter {
     return u;
   }
 
-  /** End the live service: it's done, and nothing is live until the next one. */
-  endLive() {
+  /** End the live service: it's done, and nothing is live until the next one. undo: as in setLive. */
+  endLive({ undo = null } = {}) {
     const s = this.live();
     if (!s) throw new Error('No service is live');
     Object.assign(s, { state: 'done', endedAt: new Date().toISOString() });
     this.data.liveId = null;
-    this.data.undo = null;
+    this.data.undo = undo ? { ...undo, serviceId: s.id, ended: true, at: new Date().toISOString() } : null;
     this.save();
     return s;
   }

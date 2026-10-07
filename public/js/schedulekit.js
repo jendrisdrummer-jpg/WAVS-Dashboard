@@ -63,14 +63,21 @@ export function planLabel(plan = {}) {
 export function scheduleAction(e) {
   const sc = store.schedule;
   const live = sc.services.find((s) => s.id === sc.liveId);
-  if (!live) return false;
   const run = (url, ok) => api('POST', url).then(() => toast(ok)).catch((err) => toast(err.message, true));
   if (e.target.closest('[data-undo]')) {
-    if (confirm(`Undo “${live.name}” going live? Everything goes back to how it was just before: the service that was live, everyone's mics and the order of service. ${live.name} goes back to planned and won't go live by itself again (use Go live or Next service when you're ready).`)) run('/api/schedule/undo', 'Back to how it was');
+    const msg = live
+      ? `Undo “${live.name}” going live? Everything goes back to how it was just before: the service that was live, everyone's mics and the order of service. ${live.name} goes back to planned and won't go live by itself again (use Go live or Next service when you're ready).`
+      : 'Undo? The service you ended (or the order of service you cleared) comes back, with everyone\'s mics.';
+    if (confirm(msg)) run('/api/schedule/undo', 'Back to how it was');
     return true;
   }
+  if (e.target.closest('[data-clear]')) {
+    if (confirm('Clear the order of service that\'s still loaded? Dashboards then show “No service live” and what\'s next. (Undo puts it back.)')) run('/api/schedule/clear', 'Cleared');
+    return true;
+  }
+  if (!live) return false;
   if (e.target.closest('[data-end]')) {
-    if (confirm(`End “${live.name}”? It's marked done and nothing is live until the next service (which still goes live by itself at its usual time, if that's on).`)) run('/api/schedule/end', `${live.name} ended`);
+    if (confirm(`End “${live.name}”? It's marked done, and its order of service, countdowns and mic assignments are cleared from the dashboards until the next service goes live (by itself at its usual time, if that's on). Undo brings it back.`)) run('/api/schedule/end', `${live.name} ended`);
     return true;
   }
   return false;

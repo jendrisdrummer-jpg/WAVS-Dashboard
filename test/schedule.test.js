@@ -117,3 +117,20 @@ test('schedule: undo going live puts the previous service back; the undone one w
   assert.ok(!sc.canUndo());
   assert.throws(() => sc.endLive(), /No service is live/);
 }));
+
+test('schedule: End service and Clear can be undone', () => withSchedule((sc) => {
+  const a = sc.addService({ name: 'Session 1', start: '2026-05-02T09:00' });
+  sc.setLive(a.id);
+  sc.endLive({ undo: { greenroom: 'during-a' } });
+  assert.ok(sc.canUndo());
+  assert.equal(sc.undoLive().greenroom, 'during-a');
+  assert.equal(sc.data.liveId, a.id);
+  assert.equal(sc.get(a.id).state, 'live');
+
+  sc.endLive();
+  sc.data.undo = { greenroom: 'old plan', serviceId: null, cleared: true };
+  assert.ok(sc.canUndo());
+  assert.equal(sc.undoLive().greenroom, 'old plan');
+  assert.equal(sc.data.liveId, null);
+  assert.ok(!sc.canUndo());
+}));
