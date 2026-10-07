@@ -17,9 +17,21 @@ test('settings: tidies gear and gives every device an id', () => {
 });
 
 test('settings: explains what is wrong with bad gear', () => {
-  assert.throws(() => normalizeSettings({ mics: { receivers: [{ name: 'Rack A', host: '' }] } }), /Rack A: an IP address/);
+  assert.throws(() => normalizeSettings({ mics: { receivers: [{ name: 'Rack A', host: '192.168.1.300!' }] } }), /Rack A: .* doesn't look like an IP/);
   assert.throws(() => normalizeSettings({ propresenter: [{ name: 'PP', host: 'not a host!' }] }), /doesn't look like an IP/);
   assert.throws(() => normalizeSettings({ video: { sources: [{ label: 'Program', type: 'webrtc', url: 'ftp://x' }] } }), /must start with http/);
+});
+
+test('settings: gear can be saved before its IP address is known', () => {
+  const s = normalizeSettings({
+    mics: { receivers: [{ name: 'Rack B', host: '', model: 'SLXD4D', channels: [{ label: 'HH 1' }, { label: 'HH 2' }] }] },
+    switchers: [{ name: 'ATEM', type: 'atem' }],
+    propresenter: [{ name: 'PP' }],
+  });
+  assert.equal(s.mics.receivers[0].host, '');
+  assert.equal(s.mics.receivers[0].channels.length, 2);
+  assert.equal(s.switchers[0].host, '');
+  assert.equal(s.propresenter[0].host, '');
 });
 
 test('settings: secrets never go to the browser and survive a round trip', () => {

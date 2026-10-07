@@ -95,6 +95,9 @@ async function testPco(cfg) {
 
 export async function testDevice(kind, cfg) {
   if (cfg?.type === 'simulator') return { ok: true, detail: 'Simulated device (no hardware needed)' };
+  if (['receiver', 'switcher', 'propresenter'].includes(kind) && !String(cfg?.host || '').trim()) {
+    return { ok: false, detail: 'Enter its IP address to test it. You can still save it without one and add the address later.' };
+  }
   try {
     switch (kind) {
       case 'receiver': return await testShure(cfg);

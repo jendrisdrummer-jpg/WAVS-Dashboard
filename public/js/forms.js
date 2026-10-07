@@ -3,11 +3,12 @@ import { esc, api, icon } from './common.js';
 
 /** Shure models and how many channels each has, so picking a model fills in the channels. */
 export const SHURE_MODELS = [
-  ['', 'Detect automatically', 2],
   ['SLXD4', 'SLX-D4 (single)', 1], ['SLXD4D', 'SLX-D4D (dual)', 2], ['SLXD4Q', 'SLX-D4Q (quad)', 4],
   ['ULXD4', 'ULX-D4 (single)', 1], ['ULXD4D', 'ULX-D4D (dual)', 2], ['ULXD4Q', 'ULX-D4Q (quad)', 4],
   ['QLXD4', 'QLX-D4', 1], ['AD4D', 'Axient AD4D', 2], ['AD4Q', 'Axient AD4Q', 4],
+  ['', 'Other / not sure', 2],
 ];
+const IP_HINT = 'Leave empty if you don\'t know it yet: it\'s saved as a placeholder and connects once you add the address.';
 const KINDS = [['handheld', 'Handheld'], ['headset', 'Headset'], ['lav', 'Lav'], ['iem', 'In-ear'], ['instrument', 'Instrument']];
 
 export const KIND_LABEL = {
@@ -35,10 +36,10 @@ export function deviceForm(kind, d = {}, ctx = {}) {
         ${field('Name', input('name', d.name, 'placeholder="e.g. SLX-D Rack A" required'))}
         <div class="f-row">
           ${field('Type', `<select name="type">${opt([['shure', 'Shure (SLX-D, ULX-D, QLX-D, Axient)'], ['simulator', 'Simulated (for testing)']], d.type || 'shure')}</select>`)}
-          ${field('Model', `<select name="model">${opt(SHURE_MODELS.map(([v, l]) => [v, l]), d.model || '')}</select>`)}
+          ${field('Model', `<select name="model">${opt(SHURE_MODELS.map(([v, l]) => [v, l]), d.id ? d.model || '' : 'SLXD4D')}</select>`)}
         </div>
         <div class="f-row" data-when="shure">
-          ${field('IP address', input('host', d.host, 'placeholder="192.168.1.101" inputmode="decimal"'), 'Shown on the receiver: Menu → Network')}
+          ${field('IP address', input('host', d.host, 'placeholder="e.g. 192.168.1.101" inputmode="decimal"'), `Shown on the receiver: Menu → Network. ${IP_HINT}`)}
           ${field('Port', input('port', d.port || 2202, 'inputmode="numeric"'))}
         </div>
         <div class="f"><span>Channels</span><div class="ch-list">${channelRows(chans)}</div>
@@ -49,7 +50,7 @@ export function deviceForm(kind, d = {}, ctx = {}) {
         ${field('Name', input('name', d.name, 'placeholder="e.g. ATEM Constellation" required'))}
         <div class="f-row">
           ${field('Type', `<select name="type">${opt([['atem', 'Blackmagic ATEM'], ['vmix', 'vMix'], ['simulator', 'Simulated (for testing)']], d.type || 'atem')}</select>`)}
-          ${field('IP address', input('host', d.host, 'placeholder="192.168.1.240" inputmode="decimal"'), 'ATEM Setup → Network')}
+          ${field('IP address', input('host', d.host, 'placeholder="e.g. 192.168.1.240" inputmode="decimal"'), `ATEM Setup → Network. ${IP_HINT}`)}
         </div>
         <div class="f-row">
           ${field('Default M/E', `<input type="number" name="me" min="1" max="4" value="${esc(d.me || 1)}">`, 'Used for tally overlays')}
@@ -62,7 +63,7 @@ export function deviceForm(kind, d = {}, ctx = {}) {
         ${field('Name', input('name', d.name, 'placeholder="e.g. ProPresenter – Main" required'))}
         <div class="f-row">
           ${field('Type', `<select name="type">${opt([['propresenter', 'ProPresenter 7'], ['simulator', 'Simulated (for testing)']], d.type || 'propresenter')}</select>`)}
-          ${field('IP address', input('host', d.host, 'placeholder="192.168.1.20" inputmode="decimal"'))}
+          ${field('IP address', input('host', d.host, 'placeholder="e.g. 192.168.1.20" inputmode="decimal"'), IP_HINT)}
           ${field('Port', input('port', d.port || 1025, 'inputmode="numeric"'), 'ProPresenter → Settings → Network')}
         </div>`;
     case 'video':

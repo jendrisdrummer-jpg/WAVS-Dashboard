@@ -762,10 +762,10 @@ body.cx { min-height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-in
 .cc-more-menu .danger { color: var(--critical); }
 .cc-legend .cperm { width: 20px; height: 20px; cursor: default; }
 body.as-lead .lead-only-hide { display: none !important; }
-.ch-list { display: grid; gap: 6px; margin-bottom: 8px; }
-.ch-row { display: flex; gap: 6px; align-items: center; }
-.ch-row input[type=text] { flex: 1; }
-.ch-row input[type=color] { width: 36px; height: 32px; padding: 0; border: 0; background: none; }
+.cch-list { display: grid; gap: 6px; margin-bottom: 8px; }
+.cch-row { display: flex; gap: 6px; align-items: center; }
+.cch-row input[type=text] { flex: 1; }
+.cch-row input[type=color] { width: 36px; height: 32px; padding: 0; border: 0; background: none; }
 .cc-table.small select { font-size: 12px; }
 
 /* comms widget */
@@ -775,3 +775,16 @@ body.as-lead .lead-only-hide { display: none !important; }
 .cw-p { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--panel); color: var(--text-2); }
 .cw-p.live { background: var(--live); color: #fff; font-weight: 700; }
 .cx .btn.big { justify-content: center; }
+
+/* Gear page: "+ Add gear" menu, placeholders */
+.add-gear { position: relative; }
+.add-gear-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 280px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px; display: grid; box-shadow: 0 12px 40px rgba(0, 0, 0, .5); }
+.add-gear-menu button { display: grid; gap: 2px; text-align: left; padding: 10px 12px; border: 0; background: none; border-radius: 8px; cursor: pointer; }
+.add-gear-menu button:hover, .add-gear-menu button:focus-visible { background: var(--panel-2); }
+.add-gear-menu small { color: var(--muted); }
+.dev-empty { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.dev-empty p { margin: 0; flex: 1 1 300px; }
+.dev.s-off { border-style: dashed; }
+.dev.s-off .dev-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
+.page-head .row-btns { align-items: center; }
+.dlg-fields .f-row { align-items: start; }

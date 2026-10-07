@@ -16,6 +16,7 @@ const SECTIONS = [
 
 /** Live status for one device: { state: 'ok' | 'bad' | 'off' | 'unknown', text, detail } */
 function status(kind, d) {
+  if (kind !== 'video' && d.type !== 'simulator' && !d.host) return { state: 'off', text: 'Placeholder', detail: 'No IP address yet. Click Edit to add it when you have it.' };
   if (kind === 'receiver') {
     const st = store.state.receivers[d.id];
     if (!st) return { state: 'unknown', text: 'Starting…' };
@@ -51,7 +52,7 @@ function render() {
     const list = sec.list(settings);
     const cards = list.map((d, i) => {
       const st = status(sec.kind, d);
-      if (sec.kind !== 'video') { total++; if (st.state === 'ok') ok++; }
+      if (sec.kind !== 'video' && st.state !== 'off') { total++; if (st.state === 'ok') ok++; }
       return `<div class="dev s-${st.state}">
         <span class="dev-dot" aria-hidden="true"></span>
         <div class="dev-main">
@@ -69,7 +70,8 @@ function render() {
     return `<section class="panel">
       <h2>${icon(sec.icon)} ${sec.title} <span class="muted">${list.length || ''}</span>
         <button class="btn small primary" data-act="add" data-kind="${sec.kind}" style="margin-left:auto">${icon('plus')} Add</button></h2>
-      <div class="panel-body dev-list">${cards || `<p class="muted">${sec.empty}</p>`}</div>
+      <div class="panel-body dev-list">${cards || `<div class="dev-empty"><p class="muted">${sec.empty}</p>
+        <button class="btn primary" data-act="add" data-kind="${sec.kind}">${icon('plus')} Add ${sec.kind === 'propresenter' ? 'ProPresenter' : KIND_LABEL[sec.kind].toLowerCase()}</button></div>`}</div>
     </section>`;
   }).join('');
 
@@ -81,9 +83,12 @@ function render() {
   if (settings.planningCenter) { total++; if (pco.ok) ok++; }
 
   setHTML(document.getElementById('sections'), html + pcoCard);
+  document.getElementById('reconnect').classList.toggle('hidden', !total);
+  const placeholders = SECTIONS.reduce((n, sec) => n + (sec.kind === 'video' ? 0 : sec.list(settings).filter((d) => d.type !== 'simulator' && !d.host).length), 0);
   document.getElementById('summary').innerHTML = total
     ? `<b class="${ok === total ? 'ok' : 'over'}">${ok} of ${total}</b> connected${ok === total ? ' · everything looks good' : ''}`
-    : 'Nothing added yet. Add your receivers, switcher and ProPresenter below.';
+    + (placeholders ? ` · ${placeholders} waiting for an IP address` : '')
+    : placeholders ? `${placeholders} placeholder${placeholders > 1 ? 's' : ''} waiting for an IP address. Click <b>Edit</b> on each to add it.` : 'Nothing added yet. Click <b>+ Add gear</b> to add your receivers, switcher and ProPresenter. You don\'t need the IP addresses yet.';
 }
 
 // ---------------------------------------------------------------- add / edit dialog
@@ -146,6 +151,20 @@ document.getElementById('sections').addEventListener('click', async (e) => {
     await save(sec.set(settings, sec.list(settings).filter((_, j) => j !== i)), 'Removed');
   }
 });
+
+// "+ Add gear" menu
+const addBtn = document.getElementById('add-gear');
+const addMenu = document.getElementById('add-gear-menu');
+const toggleAdd = (open) => { addMenu.classList.toggle('hidden', !open); addBtn.setAttribute('aria-expanded', String(open)); };
+addBtn.onclick = (e) => { e.stopPropagation(); toggleAdd(addMenu.classList.contains('hidden')); };
+document.addEventListener('click', (e) => { if (!addMenu.contains(e.target)) toggleAdd(false); });
+addMenu.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-add]');
+  if (!b) return;
+  toggleAdd(false);
+  openDialog(b.dataset.add, null);
+});
+if (new URLSearchParams(location.search).get('add')) openDialog(new URLSearchParams(location.search).get('add'), null);
 
 document.getElementById('reconnect').onclick = async () => {
   try { await api('POST', '/api/gear/reconnect'); } catch (err) { toast(err.message, true); }
