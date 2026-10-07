@@ -100,7 +100,7 @@ $('join').addEventListener('click', async (e) => {
   if (t && !t.disabled) { tab = t.dataset.tab; renderJoin(); }
   if (e.target.id === 'offsite-toggle') {
     const on = !info.remote?.enabled;
-    if (on && !confirm('Turn on off-site access?\n\nPhones on any network (hotspot, cellular) can then join comms through a secure Cloudflare link. Only the comms page is reachable through it, not the dashboard or settings.')) return;
+    if (on && !confirm('Turn on off-site access?\n\nPhones on any network (mobile data, a hotspot) can then join comms through a secure Cloudflare link. Your team can also open the dashboard through it after signing in with their account.')) return;
     try { await api('POST', '/api/comms/remote', { on }); } catch (err) { return toast(err.message, true); }
     if (on) tab = 'anywhere';
     refreshInfo();

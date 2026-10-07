@@ -132,7 +132,7 @@ export class Comms extends EventEmitter {
     this.sockets.add(ws);
     // Off-site phones come in through the tunnel (from 127.0.0.1) but are never "this computer".
     ws.remote = Boolean(req.viaTunnel);
-    ws.authRank = ws.remote ? 0 : req.authRank || 0; // dashboard account role (0 = not signed in)
+    ws.authRank = req.authRank || 0; // dashboard account role (0 = not signed in)
     ws.isLocal = !ws.remote && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
     ws.ip = (ws.remote && req.headers['cf-connecting-ip']) || req.socket.remoteAddress;
     ws.on('message', (raw, isBinary) => {
@@ -229,7 +229,8 @@ export class Comms extends EventEmitter {
   }
 
   hello(ws, { role, token, pin }) {
-    if (ws.remote && (role === 'engine' || role === 'control')) throw new Error('Only the comms phone page is available off-site');
+    // Off-site: phones, and comms control for signed-in producers. The engine mixes audio here only.
+    if (ws.remote && (role === 'engine' || (role === 'control' && !(ws.authRank >= 2)))) throw new Error(role === 'engine' ? 'The comms engine must run on the dashboard computer' : 'Sign in as a producer to control comms off-site');
     if (role === 'engine') {
       // The mixer must run on the dashboard computer itself (or know the admin PIN).
       if (!ws.isLocal && !this.checkPin(pin) && !(ws.authRank >= 3)) throw new Error('The comms engine must run on the dashboard computer (or enter the admin PIN)');

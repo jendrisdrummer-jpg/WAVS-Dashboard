@@ -307,7 +307,7 @@ With both off, anyone on the network can join and pick a position.
      - Android: tap **Advanced → Proceed**.
 
      Change the port with `HTTPS_PORT=...` (`HTTPS_PORT=0` turns it off).
-   - **Anywhere** (turn on **Off-site access** on the Comms page): a secure link like `https://<random>.trycloudflare.com/comms` that works on any network (Wi-Fi, a personal hotspot, cellular) with no certificate warning. It uses a free Cloudflare quick tunnel and needs no account. The first time, the dashboard downloads Cloudflare's `cloudflared` program into the data folder (`bin/`); if you already installed it with Homebrew, that copy is used. The link changes each time the dashboard restarts, and the QR code updates with it. Only the comms phone page is reachable through this link: the dashboard, settings and the comms control page are not. Set a **team password** or **Only people on the list** when using it.
+   - **Anywhere** (turn on **Off-site access** on the Comms page): a secure link like `https://<random>.trycloudflare.com/comms` that works on any network (Wi-Fi, a personal hotspot, cellular) with no certificate warning. It uses a free Cloudflare quick tunnel and needs no account. The first time, the dashboard downloads Cloudflare's `cloudflared` program into the data folder (`bin/`); if you already installed it with Homebrew, that copy is used. The link changes each time the dashboard restarts, and the QR code updates with it. Through this link, everyone except comms phones must sign in with an account (see *Use from anywhere*). Set a **team password** or **Only people on the list** for comms when using it.
 3. Use headphones. Each phone keeps its screen awake while comms is open.
 
 **How the audio travels.** A phone first tries to connect its audio directly to the comms engine, which is quickest. If that doesn't work within a few seconds (a hotspot, cellular, or guest Wi-Fi that keeps devices apart), it automatically sends its audio through the dashboard instead. The phone then shows **Connected · via internet**, and the Comms page shows *audio via internet*. That uses about 128 kbit/s each way, and only while someone is talking.
@@ -418,6 +418,17 @@ Its log is in the data folder under `logs/dashboard.log`.
 While the service is running, `npm start` reports that the dashboard is already running instead of starting a second copy.
 
 **Address.** The dashboard announces itself as **wavs.local** on your network (Bonjour/mDNS). It also answers on port 80 when it can, so no `:8080` is needed. Macs, iPhones, iPads and Windows 10+ understand `.local` names; some Android phones don't, so use the IP shown in Settings → This computer for those. To use a different name, set `WAVS_NAME=grace` (then it's `http://grace.local`). Give the computer a fixed IP if Android devices will use it.
+
+**Use from anywhere (mobile data).** In **Settings → This computer**, turn on **Use from anywhere**. The dashboard gets a secure web address through Cloudflare (free, no account needed). Phones and computers on any network can open it: mobile data, a hotspot, home Wi-Fi.
+- **Everyone signs in off-site**, whatever the "require sign-in" setting, so create accounts first.
+- Off-site, nobody can create the first account, and the comms engine only runs on the dashboard computer.
+- Invite links and QR codes automatically use the anywhere address while it's on.
+- Comms works off-site too (see Comms below).
+- Video feeds that come from the building's own network (capture cards, local streams) only show there.
+- The free address changes whenever the computer restarts. For an address that never changes, use your own domain:
+  1. In a free Cloudflare account, go to **Zero Trust → Networks → Tunnels → Create a tunnel** (Cloudflared) and copy its token.
+  2. Add a public hostname, such as `dashboard.yourchurch.org`, pointing to `http://localhost:8090`.
+  3. In Settings, open **Use your own address** and enter the address and the token.
 
 **Several host computers.** Any number of computers can host at the same time, for example your Mac for WAVS events and the church's computer for Sunday services. Each one runs its own organizations, accounts and comms. Give each computer its own name in **Settings → This computer** (e.g. `wavs` and `grace`), so they become `http://wavs.local` and `http://grace.local`. If another device already uses the name, Settings warns you. One organization runs live on one host at a time; changes don't sync between hosts.
 

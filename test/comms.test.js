@@ -19,9 +19,9 @@ function socket(local = false) {
 function setup({ pin = '1234' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comms-'));
   const comms = new Comms(dir, { checkPin: (p) => p === pin, orgName: 'Grace Church' });
-  const connect = (local = false, { offsite = false, ip = '203.0.113.9' } = {}) => {
+  const connect = (local = false, { offsite = false, ip = '203.0.113.9', authRank = 0 } = {}) => {
     const ws = socket(local);
-    comms.attach(ws, { socket: { remoteAddress: local || offsite ? '127.0.0.1' : '192.168.1.50' }, viaTunnel: offsite, headers: { 'cf-connecting-ip': ip } });
+    comms.attach(ws, { socket: { remoteAddress: local || offsite ? '127.0.0.1' : '192.168.1.50' }, viaTunnel: offsite, authRank, headers: { 'cf-connecting-ip': ip } });
     ws.msg = (m) => ws.handlers.message(JSON.stringify(m), false);
     ws.bin = (buf) => ws.handlers.message(buf, true);
     return ws;
@@ -156,15 +156,18 @@ test('talk is only allowed on channels with talk permission', () => {
   assert.deepEqual(env.comms.talking[id], undefined);
 });
 
-test('off-site: phones can join, but nobody can be the engine or control through the tunnel', () => {
+test('off-site: phones can join; control needs a signed-in producer; the engine never runs through the tunnel', () => {
   const env = setup({ pin: '' });
-  const eng = env.connect(false, { offsite: true });
+  const eng = env.connect(false, { offsite: true, authRank: 3 });
   eng.msg({ t: 'hello', role: 'engine' });
-  assert.match(eng.last('error').error, /off-site/);
+  assert.match(eng.last('error').error, /dashboard computer/);
   assert.equal(env.comms.engine, null);
   const ctl = env.connect(false, { offsite: true });
   ctl.msg({ t: 'hello', role: 'control', pin: '' });
-  assert.match(ctl.last('error').error, /off-site/);
+  assert.match(ctl.last('error').error, /producer/);
+  const prod = env.connect(false, { offsite: true, authRank: 2 });
+  prod.msg({ t: 'hello', role: 'control' });
+  assert.ok(prod.last('state'), 'a signed-in producer can run comms from anywhere');
   const ws = env.connect(false, { offsite: true });
   ws.msg({ t: 'hello', role: 'member' });
   ws.msg({ t: 'join', name: 'Remote Rita' });

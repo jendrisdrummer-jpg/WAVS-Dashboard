@@ -98,6 +98,23 @@ const requirePin = (req, res, next) => (checkPin(rt.settings.security.adminPin, 
 // Who is signed in (session cookie).
 app.use((req, _res, next) => { req.user = auth.session(sessionToken(req)); next(); });
 
+// Off-site (through the Cloudflare link, from any network): everyone signs in, whatever the
+// "require sign-in" setting, and accounts must exist. Only the sign-in pages, static files and
+// the comms phone page are open. The first (owner) account can only be made on this computer.
+const OFFSITE_OPEN = /^\/(login|join\/|api\/auth\/(status|login|logout|invite\/)|css\/|js\/|vendor\/|logo$|comms$|favicon)/;
+app.use((req, res, next) => {
+  if (!req.viaTunnel) return next();
+  if (req.path === '/api/auth/owner') return res.status(403).json({ error: 'Create the first account on the dashboard computer itself, then sign in here.' });
+  if (OFFSITE_OPEN.test(req.path)) return next();
+  if (!auth.enabled) {
+    if (req.path === '/') return res.redirect('/comms');
+    return res.status(403).send('The dashboard can be opened from anywhere once accounts are set up (Settings → Accounts on the dashboard computer). Comms works now at /comms.');
+  }
+  if (req.user && auth.rank(req.user, rt.orgId) >= 1) return next();
+  if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) return res.status(401).json({ error: 'Sign in first', login: true });
+  res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
+});
+
 /**
  * Role needed for an action. Before the first account exists, the old admin PIN (if set) guards
  * every change, as before. After that, signed-in roles do: crew < producer < admin.
@@ -142,8 +159,8 @@ app.get('/api/state', (_req, res) => res.json(rt.snapshot()));
 app.post('/api/pin/check', need('admin'), (_req, res) => res.json({ ok: true }));
 
 // ---- accounts & sign in
-const signIn = (req, res, token) => res.setHeader('set-cookie', sessionCookie(token, { secure: req.secure }));
-const clientIp = (req) => req.socket.remoteAddress || '';
+const signIn = (req, res, token) => res.setHeader('set-cookie', sessionCookie(token, { secure: req.secure || Boolean(req.viaTunnel) }));
+const clientIp = (req) => (req.viaTunnel && req.get('cf-connecting-ip')) || req.socket.remoteAddress || '';
 // What the sign-in page needs (public, even when sign-in is required to view).
 app.get('/api/auth/status', (req, res) => res.json({
   org: { name: rt.settings.org.name, theme: rt.settings.org.theme, logo: Boolean(orgs.logoFile(rt.orgId)) },
@@ -182,6 +199,7 @@ app.post('/api/auth/invite/:code', wrap((req, res) => {
 /** Address others can open: this request's host, unless that's "localhost" on this computer. */
 function shareBase(req) {
   const host = req.get('host') || '';
+  if (req.viaTunnel) return `https://${host}`;
   if (!/^(localhost|127\.|\[::1\])/.test(host)) return `${req.protocol}://${host}`;
   const port = cfg.server.port === 80 ? '' : `:${cfg.server.port}`;
   if (localName.active) return `http://${localName.host}${localName.port80 ? '' : port}`;
@@ -192,14 +210,14 @@ function shareBase(req) {
 app.get('/api/users', need('admin'), (req, res) => {
   res.json({
     users: auth.data.users.map((u) => auth.view(u, rt.orgId)),
-    invites: auth.data.invites.filter((i) => i.orgId === rt.orgId && i.expires > Date.now()).map((i) => ({ ...i, url: `${shareBase(req)}/join/${i.code}` })),
+    invites: auth.data.invites.filter((i) => i.orgId === rt.orgId && i.expires > Date.now()).map((i) => ({ ...i, url: `${shareBase(req)}/join/${i.code}`, anywhereUrl: offsiteUrl(`/join/${i.code}`) })),
     requireLogin: Boolean(auth.data.requireLogin),
     orgs: orgs.data.orgs,
   });
 });
 app.post('/api/users/invite', need('admin'), wrap((req, res) => {
   const inv = auth.invite({ orgId: rt.orgId, role: req.body?.role, by: req.user?.id, days: req.body?.days, label: req.body?.label });
-  res.json({ ...inv, url: `${shareBase(req)}/join/${inv.code}` });
+  res.json({ ...inv, url: `${shareBase(req)}/join/${inv.code}`, anywhereUrl: offsiteUrl(`/join/${inv.code}`) });
 }));
 app.delete('/api/users/invite/:code', need('admin'), wrap((req, res) => { auth.revokeInvite(req.params.code); res.json({ ok: true }); }));
 app.put('/api/users/:id/role', need('admin'), wrap((req, res) => {
@@ -435,11 +453,17 @@ app.get('/api/comms/info', (_req, res) => {
     joinUrls: ips.map((i) => `https://${i.address}:${tlsPort}/comms`),
     hostname: os.hostname(),
     httpUrl: ips[0] ? `http://${ips[0].address}:${cfg.server.port}` : null,
-    remote: { ...tunnel.state, enabled: tunnel.enabled, url: tunnel.state.url ? `${tunnel.state.url}/comms` : null },
+    remote: { ...tunnel.publicState(), url: offsiteUrl('/comms') },
   });
 });
+// Off-site access: the whole dashboard (signed in) and comms from any network, through Cloudflare.
+const offsiteUrl = (pathname = '') => (tunnel.state.status === 'on' && tunnel.state.url ? `${tunnel.state.url}${pathname}` : null);
+app.get('/api/remote', need('admin'), (_req, res) => res.json({ ...tunnel.publicState(), url: offsiteUrl(''), accounts: auth.enabled }));
 app.post('/api/comms/remote', need('admin'), wrap(async (req, res) => {
-  tunnel.enable(Boolean(req.body?.on)); // starts in the background; status comes back through /api/comms/info
+  const b = req.body || {};
+  if (b.mode || b.token !== undefined || b.hostname !== undefined) tunnel.configure({ mode: b.mode, token: b.token, hostname: b.hostname });
+  if (b.on !== undefined) tunnel.enable(Boolean(b.on)); // starts in the background; status comes back through /api/remote
+  else if (tunnel.enabled) tunnel.restart();
   res.json({ ok: true });
 }));
 app.get('/api/comms/qr.svg', wrap(async (req, res) => {
@@ -475,11 +499,11 @@ const commsWss = new WebSocketServer({ noServer: true }); // phones, comms engin
 commsWss.on('connection', (ws, req) => rt.comms.attach(ws, req));
 
 function upgrade(req, socket, head) {
-  req.viaTunnel = false;
+  req.viaTunnel = Boolean(req.viaTunnel);
   req.user = auth.session(sessionToken(req));
   req.authRank = auth.enabled ? auth.rank(req.user, rt.orgId) : 0;
   const { pathname: p } = new URL(req.url, 'http://x');
-  if (p === '/ws' && auth.enabled && auth.data.requireLogin && req.authRank < 1) {
+  if (p === '/ws' && ((auth.enabled && auth.data.requireLogin) || req.viaTunnel) && req.authRank < 1) {
     socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
     return;
   }
@@ -490,26 +514,24 @@ function upgrade(req, socket, head) {
 }
 server.on('upgrade', upgrade);
 
-// ---------------------------------------------------------------- off-site comms (Cloudflare tunnel)
-// A separate local-only server that the tunnel points at. It serves the comms phone page and its
-// socket and nothing else, so the dashboard, settings and admin API are never reachable off-site.
-const remoteApp = express();
-remoteApp.disable('x-powered-by');
-const REMOTE_FILES = { '/comms': 'comms.html', '/css/app.css': 'css/app.css', '/js/comms.js': 'js/comms.js', '/js/comms-routing.js': 'js/comms-routing.js', '/js/comms-worklet.js': 'js/comms-worklet.js' };
-remoteApp.get('/', (_req, res) => res.redirect('/comms'));
-for (const [route, file] of Object.entries(REMOTE_FILES)) remoteApp.get(route, (_req, res) => res.sendFile(path.join(pub, file)));
-remoteApp.use((_req, res) => res.status(404).send('Not available off-site'));
-const remoteServer = http.createServer(remoteApp);
-remoteServer.on('upgrade', (req, socket, head) => {
-  if (new URL(req.url, 'http://x').pathname !== '/comms-ws') return socket.destroy();
-  req.viaTunnel = true; // never treated as "this computer", even though it arrives from 127.0.0.1
-  commsWss.handleUpgrade(req, socket, head, (ws) => commsWss.emit('connection', ws, req));
-});
+// ---------------------------------------------------------------- off-site access (Cloudflare tunnel)
+// A local-only server that the Cloudflare link points at. It's the same dashboard, but every
+// request through it is marked off-site, so it needs a signed-in account (see the gate above),
+// and the comms engine can't run through it.
+const remoteServer = http.createServer((req, res) => { req.viaTunnel = true; app(req, res); });
+remoteServer.on('upgrade', (req, socket, head) => { req.viaTunnel = true; upgrade(req, socket, head); });
 const tunnel = new Tunnel(dataDir, 0);
-remoteServer.listen(Number(process.env.COMMS_REMOTE_PORT) || 0, '127.0.0.1', () => {
+const REMOTE_PORT = Number(process.env.COMMS_REMOTE_PORT) || 8090; // fixed, so a Cloudflare tunnel with your own address can point at it
+remoteServer.on('error', (e) => {
+  if (e.code !== 'EADDRINUSE' || remoteServer.listening) return console.error(`[remote] ${e.message}`);
+  console.error(`[remote] port ${REMOTE_PORT} is busy; using another one (a free Cloudflare link still works)`);
+  remoteServer.listen(0, '127.0.0.1');
+});
+remoteServer.on('listening', () => {
   tunnel.port = remoteServer.address().port;
   if (tunnel.enabled) tunnel.start();
 });
+remoteServer.listen(REMOTE_PORT, '127.0.0.1');
 
 // HTTPS (self-signed) so phones may use their microphone for comms. Browsers only allow
 // microphones on https:// pages (or localhost). The certificate is created once and kept in data/tls/.
