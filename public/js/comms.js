@@ -24,6 +24,10 @@ const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:
 let started = false;
 const talking = new Set(); // channel ids I'm talking on
 let latchMode = localStorage.getItem('wavs-comms-latch') || 'auto'; // auto: tap = latch, hold = momentary
+// Channels picked to talk on (like Unity's talk keys): the one big TALK button talks to all of them.
+const ARMED = 'wavs-comms-armed';
+let armed = null; // Set, loaded once we know my channels
+const ptting = () => talking.size > 0;
 
 // ---------------------------------------------------------------- socket
 
@@ -224,37 +228,74 @@ function setTalk(ch, on) {
 }
 function resendTalk() { for (const ch of talking) send({ t: 'talk', channel: ch, on: true }); }
 
-// Press and hold = talk while held. Quick tap = latch on / off (unless latching is turned off).
-function bindTalk(btn, ch) {
+// The channels I may talk on, and which of them are picked.
+const talkable = () => (state?.channels || []).filter((c) => me?.perms?.[c.id]?.talk).map((c) => c.id);
+function loadArmed() {
+  const can = talkable();
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(ARMED) || 'null'); } catch { /* ignore */ }
+  armed = new Set((Array.isArray(saved) ? saved : can.slice(0, 1)).filter((id) => can.includes(id)));
+}
+function saveArmed() { try { localStorage.setItem(ARMED, JSON.stringify([...armed])); } catch { /* ignore */ } }
+
+/** Talk (or stop) on every picked channel. */
+function setPtt(on) {
+  if (on) for (const ch of armed) setTalk(ch, true);
+  else for (const ch of [...talking]) setTalk(ch, false);
+  renderTalk();
+}
+
+// The big TALK button: press and hold = talk while held; a quick tap latches on / off
+// (unless latching is turned off in ⋯).
+(function bindPtt() {
+  const btn = $('ptt');
   let downAt = 0;
   let wasOn = false;
-  const down = (e) => {
+  btn.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    if (btn.disabled) return;
     btn.setPointerCapture?.(e.pointerId);
     downAt = Date.now();
-    wasOn = talking.has(ch);
-    if (!wasOn) setTalk(ch, true);
-  };
+    wasOn = ptting();
+    if (!wasOn) setPtt(true);
+  });
   const up = (e) => {
     e.preventDefault();
     if (!downAt) return;
     const quick = Date.now() - downAt < 300;
     downAt = 0;
-    if (wasOn) setTalk(ch, false); // tap again to unlatch
-    else if (!(quick && latchMode === 'auto')) setTalk(ch, false); // held = momentary
+    if (wasOn) setPtt(false); // tap again to unlatch
+    else if (!(quick && latchMode === 'auto')) setPtt(false); // held = momentary
   };
-  btn.addEventListener('pointerdown', down);
   btn.addEventListener('pointerup', up);
   btn.addEventListener('pointercancel', up);
   btn.addEventListener('contextmenu', (e) => e.preventDefault());
-}
+})();
 
+// Keys: tap a key to pick / unpick it for talking; the 🔊 corner turns listening on / off.
 $('channels').addEventListener('click', (e) => {
   const lb = e.target.closest('[data-listen]');
-  if (lb) send({ t: 'listen', channel: lb.dataset.listen, on: !(me.listen?.[lb.dataset.listen] !== false) });
+  if (lb) { send({ t: 'listen', channel: lb.dataset.listen, on: !(me.listen?.[lb.dataset.listen] !== false) }); return; }
+  const key = e.target.closest('[data-key]');
+  if (!key || !me.perms?.[key.dataset.key]?.talk) return;
+  const ch = key.dataset.key;
+  if (armed.has(ch)) { armed.delete(ch); if (talking.has(ch)) setTalk(ch, false); } else { armed.add(ch); if (ptting()) setTalk(ch, true); }
+  saveArmed();
+  navigator.vibrate?.(8);
+  render(true);
 });
-$('channels').addEventListener('input', (e) => {
+
+// Mix: volume per channel I listen to.
+$('mix-btn').onclick = () => {
+  const open = $('mix').classList.toggle('hidden') === false;
+  $('mix-btn').setAttribute('aria-expanded', String(open));
+  if (open) render(true);
+};
+$('mix').addEventListener('input', (e) => {
   if (e.target.dataset.vol) send({ t: 'listen', channel: e.target.dataset.vol, volume: Number(e.target.value) / 100 });
+});
+$('mix').addEventListener('click', (e) => {
+  if (e.target.closest('[data-mix-close]')) { $('mix').classList.add('hidden'); $('mix-btn').setAttribute('aria-expanded', 'false'); }
 });
 
 $('menu-btn').onclick = () => $('menu').classList.toggle('hidden');
@@ -302,48 +343,66 @@ function setStatus() {
   el.className = `cx-status ${cls}`;
 }
 
-function render() {
+function render(force = false) {
   if (!state || !me) return;
   setStatus();
   $('me-name').textContent = me.name;
   $('me-pos').textContent = ` · ${positionName(me.position)}${me.lead ? ' · Lead' : ''}`;
   $('control-link').classList.toggle('hidden', !me.lead);
   $('latch-mode').textContent = latchMode === 'auto' ? 'Talk: hold, or tap to latch ✓' : 'Talk: hold only ✓';
-  $('hint').textContent = latchMode === 'auto' ? 'Hold TALK to talk. Tap it once to stay on; tap again to stop.' : 'Hold TALK to talk.';
+  if (!armed) loadArmed();
+  for (const ch of [...armed]) if (!me.perms?.[ch]?.talk) armed.delete(ch); // the producer took it away
 
   const mine = state.channels.filter((c) => me.perms?.[c.id]?.talk || me.perms?.[c.id]?.listen);
-  const key = JSON.stringify([mine, me.perms, me.listen, me.volume, me.muted]);
-  if ($('channels')._key !== key) {
+  const key = JSON.stringify([mine, me.perms, me.listen, me.muted, [...armed]]);
+  if ($('channels')._key !== key || force) {
     $('channels')._key = key;
     $('channels').innerHTML = mine.length ? mine.map((c) => {
       const p = me.perms[c.id];
       const on = p.listen && me.listen?.[c.id] !== false;
-      const vol = Math.round((me.volume?.[c.id] ?? 1) * 100);
-      return `<div class="cx-ch" style="--ch:${esc(c.color)}" data-ch="${esc(c.id)}">
-        <div class="cx-ch-head"><b>${esc(c.name)}</b><span class="cx-ch-who" data-who="${esc(c.id)}"></span></div>
-        <div class="cx-ch-ctl">
-          ${p.listen ? `<button class="cx-listen ${on ? 'on' : ''}" data-listen="${esc(c.id)}" aria-pressed="${on}">${on ? '🔊 Listening' : '🔇 Off'}</button>
-          <input type="range" min="0" max="100" value="${vol}" data-vol="${esc(c.id)}" aria-label="${esc(c.name)} volume" ${on ? '' : 'disabled'}>` : '<span class="muted small">Talk only</span>'}
-        </div>
-        ${p.talk ? `<button class="cx-talk" data-talk="${esc(c.id)}" ${me.muted ? 'disabled' : ''}>TALK</button>` : '<div class="cx-talk-none muted small">Listen only</div>'}
+      const picked = armed.has(c.id);
+      return `<div class="cx-key ${picked ? 'armed' : ''} ${p.talk ? '' : 'listen-only'}" style="--ch:${esc(c.color)}" data-key="${esc(c.id)}"
+          role="button" tabindex="0" aria-pressed="${picked}" aria-label="${esc(c.name)}${p.talk ? (picked ? ', picked for talk' : ', tap to talk on it') : ', listen only'}">
+        ${p.listen ? `<button class="cx-key-listen ${on ? 'on' : ''}" data-listen="${esc(c.id)}" aria-pressed="${on}" aria-label="${on ? 'Listening' : 'Not listening'}: ${esc(c.name)}">${on ? '🔊' : '🔇'}</button>` : '<span class="cx-key-listen none" title="Talk only">🔇</span>'}
+        <b class="cx-key-name">${esc(c.name)}</b>
+        <span class="cx-key-who" data-who="${esc(c.id)}"></span>
+        <span class="cx-key-state">${!p.talk ? 'Listen only' : picked ? 'TALK ✓' : 'Tap to talk'}</span>
       </div>`;
     }).join('') : '<p class="muted cx-none">The producer hasn\'t given you any channels yet.</p>';
-    for (const b of $('channels').querySelectorAll('[data-talk]')) bindTalk(b, b.dataset.talk);
   }
+  const listening = mine.filter((c) => me.perms[c.id].listen);
+  const mixKey = JSON.stringify([listening.map((c) => c.id), me.listen, me.volume]);
+  if (!$('mix').classList.contains('hidden') && ($('mix')._key !== mixKey || force)) {
+    $('mix')._key = mixKey;
+    $('mix').innerHTML = `<div class="cx-mix-head"><b>Volumes</b><button class="btn small" data-mix-close>Done</button></div>
+      ${listening.map((c) => {
+        const on = me.listen?.[c.id] !== false;
+        return `<label class="cx-mix-row" style="--ch:${esc(c.color)}"><span>${esc(c.name)}${on ? '' : ' <small class="muted">(off)</small>'}</span>
+          <input type="range" min="0" max="100" value="${Math.round((me.volume?.[c.id] ?? 1) * 100)}" data-vol="${esc(c.id)}" aria-label="${esc(c.name)} volume" ${on ? '' : 'disabled'}></label>`;
+      }).join('') || '<p class="muted">You don\'t listen to any channels.</p>'}`;
+  }
+  const canTalk = talkable().length > 0;
+  $('ptt').disabled = me.muted || !armed.size;
+  $('ptt').classList.toggle('hidden', !canTalk);
+  $('hint').textContent = !canTalk ? 'Listen only: the producer hasn\'t given you a channel to talk on.'
+    : !armed.size ? 'Tap a channel to pick it, then hold TALK.'
+      : latchMode === 'auto' ? 'Hold TALK to talk on the picked channels. Tap it to stay on; tap again to stop.' : 'Hold TALK to talk on the picked channels.';
   renderTalk();
 }
 
 function renderTalk() {
   if (!state) return;
-  for (const b of $('channels').querySelectorAll('[data-talk]')) {
-    const on = talking.has(b.dataset.talk);
-    b.classList.toggle('on', on);
-    b.textContent = on ? 'TALKING' : 'TALK';
-  }
+  const ptt = $('ptt');
+  ptt.classList.toggle('on', ptting());
+  const names = state.channels.filter((c) => talking.has(c.id) || (!ptting() && armed?.has(c.id))).map((c) => c.name);
+  ptt.innerHTML = ptting() ? `TALKING<small>${esc(names.join(' · '))}</small>` : `TALK${names.length ? `<small>${esc(names.join(' · '))}</small>` : ''}`;
+  ptt.style.setProperty('--ch', state.channels.find((c) => armed?.has(c.id))?.color || 'var(--accent)');
+  for (const k of $('channels').querySelectorAll('[data-key]')) k.classList.toggle('talking', talking.has(k.dataset.key));
   const others = state.members.filter((m) => m.id !== me.id && m.online);
   for (const el of $('channels').querySelectorAll('[data-who]')) {
     const who = others.filter((m) => m.talking?.[el.dataset.who]).map((m) => m.name.split(' ')[0]);
     el.textContent = who.length ? `🗣 ${who.join(', ')}` : '';
+    el.closest('[data-key]')?.classList.toggle('busy', who.length > 0);
   }
   const live = others.map((m) => ({ m, chs: talkingOn(m, state.channels) })).filter((x) => x.chs.length);
   $('talkers').innerHTML = live.map(({ m, chs }) => `<span class="cx-talker">${esc(m.name)} <small>${chs.map((c) => esc(c.name)).join(', ')}</small></span>`).join('');

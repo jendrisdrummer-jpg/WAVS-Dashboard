@@ -47,7 +47,7 @@ window.addEventListener('beforeunload', (e) => { if (ctx) { e.preventDefault(); 
 function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws`);
   ws.binaryType = 'arraybuffer';
-  ws.onopen = () => send({ t: 'hello', role: 'engine', pin: localStorage.getItem('wavs-pin') || undefined });
+  ws.onopen = () => { send({ t: 'hello', role: 'engine', pin: localStorage.getItem('wavs-pin') || undefined }); setTimeout(reportDevices, 500); };
   ws.onclose = () => {
     for (const id of [...peers.keys(), ...relays.keys()]) dropPeer(id);
     status('Reconnecting to the dashboard…', false);
@@ -316,48 +316,31 @@ async function syncPorts() {
     } catch (e) { portErrors[p.id] = e.message; }
   }
   syncPorts.errors = portErrors;
+  send({ t: 'port-status', errors: portErrors });
   applyMatrix();
   renderPorts();
 }
 
-// Port editor
-let draft = null;
-async function renderPorts() {
-  if (!ctx) { $('ports').innerHTML = '<p class="muted small">Start the engine first.</p>'; return; }
-  draft ||= structuredClone(state?.ports || []);
-  const list = await deviceList();
-  const chans = state?.channels || [];
-  const errs = syncPorts.errors || {};
-  $('ports').innerHTML = draft.length ? draft.map((p, i) => `<div class="port-row" data-i="${i}">
-    <b class="port-kind ${p.kind}">${p.kind === 'in' ? 'IN' : 'OUT'}</b>
-    <input type="text" data-k="name" value="${esc(p.name)}" placeholder="${p.kind === 'in' ? 'e.g. WING talkback' : 'e.g. To WING bus 12'}" aria-label="Name">
-    <select data-k="device" aria-label="Device"><option value="">Choose device…</option>${(p.kind === 'in' ? list.in : list.out).map((d) => `<option ${d.label === p.device ? 'selected' : ''}>${esc(d.label)}</option>`).join('')}</select>
-    <label class="port-ch">Ch <input type="number" data-k="deviceChannel" min="1" max="64" value="${p.deviceChannel || 1}"></label>
-    <div class="port-chans">${p.kind === 'in' ? 'Into' : 'Carries'}: ${chans.map((c) => `<label class="chip"><input type="checkbox" data-ch="${esc(c.id)}" ${(p.channels || []).includes(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}</div>
-    <button class="btn small danger" data-del aria-label="Remove">✕</button>
-    ${errs[p.id] ? `<small class="port-err">${esc(errs[p.id])}</small>` : ''}
-  </div>`).join('') : '<p class="muted small">No console audio set up.</p>';
-}
-$('ports').addEventListener('input', (e) => {
-  const row = e.target.closest('[data-i]');
-  if (!row) return;
-  const p = draft[row.dataset.i];
-  if (e.target.dataset.k) p[e.target.dataset.k] = e.target.dataset.k === 'deviceChannel' ? Number(e.target.value) : e.target.value;
-  if (e.target.dataset.ch) p.channels = [...row.querySelectorAll('[data-ch]:checked')].map((x) => x.dataset.ch);
-});
-$('ports').addEventListener('click', (e) => {
-  if (!e.target.closest('[data-del]')) return;
-  draft.splice(e.target.closest('[data-i]').dataset.i, 1);
-  renderPorts();
-});
-const addPort = (kind) => {
+// Audio in / out are set up on the Comms page (any computer); this tab tells it which audio
+// interfaces this computer has, applies the settings and reports problems.
+async function reportDevices() {
   if (!ctx) return;
-  draft.push({ id: `port-${Math.random().toString(36).slice(2, 8)}`, name: kind === 'in' ? 'Console talkback' : 'To console', kind, device: '', deviceChannel: 1, channels: [] });
-  renderPorts();
-};
-$('add-in').onclick = () => addPort('in');
-$('add-out').onclick = () => addPort('out');
-$('save-ports').onclick = () => { send({ t: 'ports', ports: draft }); draft = null; setTimeout(renderPorts, 400); };
+  const list = await deviceList();
+  send({ t: 'devices', devices: { in: list.in.map((d) => ({ label: d.label })), out: list.out.map((d) => ({ label: d.label })) } });
+}
+navigator.mediaDevices?.addEventListener?.('devicechange', () => { portsKey = ''; reportDevices(); if (state) syncPorts(); });
+
+function renderPorts() {
+  if (!ctx) { $('ports').innerHTML = '<p class="muted small">Start the engine first.</p>'; return; }
+  const chans = state?.channels || [];
+  const name = (id) => chans.find((c) => c.id === id)?.name || id;
+  const errs = syncPorts.errors || {};
+  $('ports').innerHTML = (state?.ports || []).length ? state.ports.map((p) => `<div class="port-row">
+    <b class="port-kind ${p.kind}">${p.kind === 'in' ? 'IN' : 'OUT'}</b><span><b>${esc(p.name)}</b> · ${esc(p.device || 'no device')} ch ${p.deviceChannel}</span>
+    <span class="muted small">${p.kind === 'in' ? 'into' : 'carries'} ${esc((p.channels || []).map(name).join(', ') || 'no channels')}</span>
+    ${errs[p.id] ? `<small class="port-err">${esc(errs[p.id])}</small>` : '<small class="g-ok-text">✓ working</small>'}
+  </div>`).join('') : '<p class="muted small">No audio in / out set up.</p>';
+}
 
 // ---------------------------------------------------------------- status
 

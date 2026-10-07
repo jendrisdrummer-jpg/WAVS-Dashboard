@@ -130,6 +130,7 @@ function render() {
   renderAccess();
   if (!chDraft) renderChannels(); // don't overwrite what's being typed
   renderPositions();
+  if (!audioDraft) renderAudio(); // don't overwrite what's being changed
   const sel = $('add-form').elements.position;
   const opts = state.positions.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   if (sel._opts !== opts) { const v = sel.value; sel.innerHTML = opts; sel._opts = opts; if (v) sel.value = v; }
@@ -295,6 +296,77 @@ $('channels').addEventListener('click', (e) => {
   }
   if (e.target.id === 'ch-cancel') { chDraft = null; $('channels')._html = null; renderChannels(); }
   if (e.target.id === 'ch-save') { send({ t: 'channels', channels: chDraft }); chDraft = null; $('channels')._html = null; }
+});
+
+// ---------------------------------------------------------------- audio in / out
+// Sound board <-> comms through an audio interface on the dashboard computer (where the comms
+// engine runs). An "in" brings one interface input (e.g. the board's talkback or program feed)
+// into comms channels; an "out" sends a mix of comms channels to one interface output
+// (e.g. into a board channel for IEMs or recording). The engine lists the interfaces it sees.
+let audioDraft = null;
+function renderAudio() {
+  const list = audioDraft || state.ports || [];
+  const devs = state.engine.devices;
+  const errs = state.engine.portErrors || {};
+  const saved = new Set((state.ports || []).map((p) => p.id));
+  const row = (p, i) => {
+    const options = devs ? devs[p.kind] : [];
+    const known = options.some((d) => d.label === p.device);
+    const status = !state.engine.online ? '<small class="muted">Engine not running</small>'
+      : !saved.has(p.id) || audioDraft ? '<small class="muted">Not saved yet</small>'
+        : errs[p.id] ? `<small class="port-err">⚠ ${esc(errs[p.id])}</small>` : '<small class="g-ok-text">✓ Working</small>';
+    return `<div class="aio-row" data-i="${i}">
+      <b class="port-kind ${p.kind}">${p.kind === 'in' ? 'IN' : 'OUT'}</b>
+      <label>Name <input type="text" data-k="name" value="${esc(p.name)}" maxlength="60" placeholder="${p.kind === 'in' ? 'e.g. Board talkback' : 'e.g. Comms to board'}"></label>
+      <label>Audio interface <select data-k="device">
+        <option value="">${devs ? (options.length ? 'Choose…' : 'No interfaces found') : 'Start the engine to list interfaces'}</option>
+        ${p.device && !known ? `<option selected>${esc(p.device)}</option>` : ''}
+        ${options.map((d) => `<option ${d.label === p.device ? 'selected' : ''}>${esc(d.label)}</option>`).join('')}</select></label>
+      <label>${p.kind === 'in' ? 'Input' : 'Output'} # <input type="number" data-k="deviceChannel" min="1" max="64" value="${p.deviceChannel || 1}"></label>
+      <div class="aio-chans"><span class="muted small">${p.kind === 'in' ? 'Goes into' : 'Sends'}:</span>
+        ${state.channels.map((c) => `<label class="chip"><input type="checkbox" data-ch="${esc(c.id)}" ${(p.channels || []).includes(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}</div>
+      <div class="aio-end">${status}<button class="btn small danger" data-del aria-label="Remove">✕</button></div>
+    </div>`;
+  };
+  setHTML($('audio'), `<p class="muted small">Plug an audio interface into the <b>dashboard computer</b> (where the comms engine runs) and wire it to your sound board.
+      <b>Audio in</b> brings a board output (talkback mic, program mix, a pastor's mic for the camera ops) into comms channels.
+      <b>Audio out</b> sends comms channels to a board input (to record comms, or put it in someone's in-ears). Each one uses one channel of the interface.</p>
+    ${list.length ? list.map(row).join('') : '<p class="muted">No audio in or out yet.</p>'}
+    <div class="row-btns" id="aio-btns">${audioButtons()}</div>`);
+}
+const audioButtons = () => `<button class="btn small" data-add="in">+ Audio in (from the board)</button>
+  <button class="btn small" data-add="out">+ Audio out (to the board)</button>
+  ${audioDraft ? '<button class="btn small primary" data-save>Save</button><button class="btn small" data-cancel>Cancel</button>' : ''}`;
+$('audio').addEventListener('input', (e) => {
+  const r = e.target.closest('[data-i]');
+  if (!r) return;
+  audioDraft ||= structuredClone(state.ports || []);
+  const p = audioDraft[r.dataset.i];
+  if (e.target.dataset.k) p[e.target.dataset.k] = e.target.dataset.k === 'deviceChannel' ? Number(e.target.value) : e.target.value;
+  if (e.target.dataset.ch) p.channels = [...r.querySelectorAll('[data-ch]:checked')].map((x) => x.dataset.ch);
+  if (!$('audio').querySelector('[data-save]')) $('aio-btns').innerHTML = audioButtons(); // keep the cursor where it is
+});
+$('audio').addEventListener('click', (e) => {
+  const add = e.target.closest('[data-add]');
+  if (add) {
+    audioDraft ||= structuredClone(state.ports || []);
+    const kind = add.dataset.add;
+    const n = audioDraft.filter((p) => p.kind === kind).length + 1;
+    audioDraft.push({ id: `${kind}-${Date.now().toString(36)}`, name: kind === 'in' ? `Board in ${n}` : `Comms out ${n}`, kind, device: '', deviceChannel: n, channels: [] });
+    renderAudio();
+  }
+  if (e.target.closest('[data-del]')) {
+    audioDraft ||= structuredClone(state.ports || []);
+    audioDraft.splice(Number(e.target.closest('[data-i]').dataset.i), 1);
+    renderAudio();
+  }
+  if (e.target.closest('[data-cancel]')) { audioDraft = null; renderAudio(); }
+  if (e.target.closest('[data-save]')) {
+    if (audioDraft.some((p) => !p.device)) { toast('Pick an audio interface for each one (start the comms engine to list them)', true); return; }
+    send({ t: 'ports', ports: audioDraft });
+    audioDraft = null;
+    toast('Saved. The comms engine opens them now.');
+  }
 });
 
 function renderPositions() {
