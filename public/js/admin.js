@@ -221,3 +221,52 @@ function render() {
 }
 
 onRender(render);
+
+// ---------------------------------------------------------------- match with ProPresenter
+const HOW = {
+  link: ['Linked', 'good'], remembered: ['Remembered', 'good'], name: ['Same name', ''], position: ['By position', ''],
+  ignore: ["Doesn't move the plan", ''], null: ['No match: the plan stays put', 'bad'],
+};
+const matchEl = document.getElementById('ppmatch-list');
+let matchKey = '';
+async function loadMatch() {
+  let d;
+  try { d = await api('GET', '/api/service/pp-match'); } catch (err) { matchEl.innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
+  const svc = store.service;
+  if (d.source === 'propresenter') { setMatch('<p class="muted">The plan <i>is</i> the ProPresenter playlist, so it always follows it.</p>'); return; }
+  if (!d.playlist) { setMatch(`<p class="muted">${d.pp === null ? 'No ProPresenter with an active playlist right now. Open the playlist in ProPresenter and this fills in.' : 'Waiting for ProPresenter…'}</p>`); return; }
+  if (!svc.plan) { setMatch('<p class="muted">Load a service plan above first.</p>'); return; }
+  const plan = svc.plan.items;
+  const opts = (sel) => `<option value="" ${!sel ? 'selected' : ''}>Auto</option>
+    <option value="ignore" ${sel === 'ignore' ? 'selected' : ''}>Don't move the plan</option>
+    <optgroup label="Plan items">${plan.map((i) => (i.type === 'header' ? `</optgroup><optgroup label="${esc(i.title)}">` : `<option value="${esc(i.id)}" ${sel === i.id ? 'selected' : ''}>${esc(i.title)}</option>`)).join('')}</optgroup>`;
+  const title = (id) => plan.find((i) => i.id === id)?.title || '';
+  setMatch(`<div class="ppm-head muted small"><span>In ProPresenter: <b>${esc(d.playlist.name)}</b></span><span>Matches plan item</span><span></span></div>
+    ${d.playlist.items.map((it) => it.type === 'header'
+      ? `<div class="ppm-hdr">${esc(it.name)}</div>`
+      : `<div class="ppm-row ${it.cued ? 'cued' : ''}">
+          <span class="ppm-name">${it.cued ? '<span class="chip live">Cued</span> ' : ''}${esc(it.name)}</span>
+          <select data-ppkey="${esc(it.key)}" data-ppname="${esc(it.name)}" aria-label="Plan item for ${esc(it.name)}">${opts(it.link)}</select>
+          <small class="ppm-how ${HOW[it.how]?.[1] || ''}">${HOW[it.how]?.[0] || ''}${it.itemId && it.how !== 'link' ? ` → ${esc(title(it.itemId))}` : ''}</small>
+        </div>`).join('')}`);
+}
+function setMatch(html) {
+  if (matchEl.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return; // don't redraw under an open menu
+  if (matchEl._html !== html) { matchEl._html = html; matchEl.innerHTML = html; }
+}
+matchEl.addEventListener('change', async (e) => {
+  const sel = e.target.closest('[data-ppkey]');
+  if (!sel) return;
+  try {
+    await api('PUT', '/api/service/links', { key: sel.dataset.ppkey, name: sel.dataset.ppname, itemId: sel.value || null });
+    toast(sel.value ? 'Linked. Remembered for future plans too.' : 'Back to automatic');
+  } catch (err) { toast(err.message, true); }
+  sel.blur();
+  loadMatch();
+});
+// Refresh when ProPresenter's playlist or the plan changes.
+onRender(() => {
+  const pls = Object.values(store.state.propresenter || {}).map((p) => p.playlist && `${p.playlist.uuid}:${p.playlist.index}:${p.playlist.items.length}`).join('|');
+  const key = `${pls}#${store.service.source}:${store.service.planId}:${store.service.plan?.items.length}:${JSON.stringify(store.service.links || {})}`;
+  if (key !== matchKey) { matchKey = key; loadMatch(); }
+});

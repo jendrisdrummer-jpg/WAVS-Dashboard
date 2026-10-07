@@ -978,3 +978,14 @@ body.as-lead .lead-only-hide { display: none !important; }
 .off-link > div { display: grid; gap: 6px; min-width: 0; }
 .off-own summary { cursor: pointer; color: var(--text-2); font-weight: 600; font-size: 13px; }
 .off-own form { margin-top: 8px; }
+
+/* Service page: match with ProPresenter */
+.ppm-head, .ppm-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr) minmax(140px, .8fr); gap: 10px; align-items: center; }
+.ppm-head { padding: 0 8px 6px; }
+.ppm-row { padding: 6px 8px; border-radius: 8px; background: var(--panel-2); margin-bottom: 4px; }
+.ppm-row.cued { outline: 2px solid var(--live); }
+.ppm-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ppm-how.good { color: var(--good); }
+.ppm-how.bad { color: var(--warning); }
+.ppm-hdr { margin: 10px 8px 4px; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 700px) { .ppm-head { display: none; } .ppm-row { grid-template-columns: 1fr; gap: 4px; } }

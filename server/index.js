@@ -399,6 +399,19 @@ app.put('/api/service/manual', need('producer'), wrap((req, res) => {
   rt.service.setManual({ title: String(req.body?.title || ''), text: String(req.body?.text || ''), start: String(req.body?.start || '') });
   res.json(rt.service.state());
 }));
+// Matching ProPresenter's playlist to the plan: what each item matches now, and setting links.
+const activePlaylist = () => Object.entries(rt.hub.state.propresenter || {}).map(([id, p]) => ({ id, ...p })).find((p) => p.online && p.playlist?.items?.length);
+app.get('/api/service/pp-match', need('producer'), (_req, res) => {
+  const pp = activePlaylist();
+  res.json({ pp: pp ? { id: pp.id, name: pp.name } : null, playlist: pp ? { name: pp.playlist.name, index: pp.playlist.index, items: rt.service.preview(pp.playlist) } : null, source: rt.service.saved.source });
+});
+app.put('/api/service/links', need('producer'), wrap((req, res) => {
+  const { key, name, itemId } = req.body || {};
+  rt.service.setLink({ key: String(key), name: String(name || ''), itemId: itemId || null });
+  const pp = activePlaylist(); // the cued item may now point somewhere else: follow it
+  if (pp && rt.service.saved.source !== 'propresenter') rt.service.onPlaylist(pp.playlist);
+  res.json({ ok: true });
+}));
 app.post('/api/service/propresenter', need('producer'), wrap((_req, res) => { rt.service.useProPresenter(); res.json(rt.service.state()); }));
 // Moving through the plan is allowed without the PIN so any operator can follow along.
 app.post('/api/service/current', need('open'), wrap((req, res) => { rt.service.setCurrent(req.body?.itemId || null, 'manual'); res.json({ ok: true }); }));

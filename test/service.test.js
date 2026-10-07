@@ -60,3 +60,50 @@ test('uses the ProPresenter playlist as the order of service', () => {
   assert.equal(svc.plan.items[1].type, 'header');
   assert.equal(svc.saved.current.itemId, 'p1:2');
 });
+
+test('ProPresenter links: a link beats names, "don\'t move" holds the plan, and links carry to next week', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wavs-'));
+  const svc = new ServiceManager({ dataDir: dir, pco: null, cfg: {} });
+  svc.setManual({ title: 'Sunday', text: '10:00 Pre-Service\n# Worship\nsong 4:30 Worship Set\n35m Message\n3:00 Closing' });
+  const [pre, , worship, message] = svc.plan.items;
+  const pl = {
+    uuid: 'pl1', name: 'Sunday', index: 0,
+    items: [
+      { name: 'Countdown Loop', type: 'media', uuid: 'a' },
+      { name: 'Announcements Loop', type: 'media', uuid: 'b' },
+      { name: 'Great Is Thy Faithfulness', type: 'presentation', uuid: 'c' },
+      { name: 'Sermon Slides', type: 'presentation', uuid: 'd' },
+      { name: 'Closing', type: 'presentation', uuid: 'e' },
+    ],
+  };
+  // Nothing linked: "Closing" matches by name; the others don't match (5 vs 4 items, so no position fallback).
+  assert.equal(svc.resolve(pl.items[4], pl).how, 'name');
+  assert.equal(svc.resolve(pl.items[0], pl).how, null);
+
+  svc.setLink({ key: 'u:a', name: 'Countdown Loop', itemId: pre.id });
+  svc.setLink({ key: 'u:b', name: 'Announcements Loop', itemId: 'ignore' });
+  svc.setLink({ key: 'u:c', name: 'Great Is Thy Faithfulness', itemId: worship.id });
+  svc.setLink({ key: 'u:d', name: 'Sermon Slides', itemId: message.id });
+
+  svc.onPlaylist({ ...pl, index: 0 });
+  assert.equal(svc.saved.current.itemId, pre.id);
+  svc.onPlaylist({ ...pl, index: 1 }); // announcement loop: plan stays on Pre-Service
+  assert.equal(svc.saved.current.itemId, pre.id);
+  svc.onPlaylist({ ...pl, index: 2 });
+  assert.equal(svc.saved.current.itemId, worship.id);
+  svc.onPlaylist({ ...pl, index: 3 });
+  assert.equal(svc.saved.current.itemId, message.id);
+  assert.deepEqual(svc.preview({ ...pl, index: 3 }).map((p) => p.how), ['link', 'ignore', 'link', 'link', 'name']);
+
+  // Next week: a brand-new plan (new item ids) with the same titles, and a new playlist (new uuids).
+  svc.setManual({ title: 'Next Sunday', text: '10:00 Pre-Service\nsong 4:30 Worship Set\n35m Message' });
+  const [pre2, worship2, message2] = svc.plan.items;
+  const pl2 = { uuid: 'pl2', name: 'Next', index: 0, items: [{ name: 'Countdown Loop', uuid: 'x' }, { name: 'Announcements Loop', uuid: 'y' }, { name: 'Sermon Slides', uuid: 'z' }, { name: 'Great Is Thy Faithfulness', uuid: 'w' }] };
+  assert.deepEqual(svc.preview(pl2).map((p) => [p.how, p.itemId]), [
+    ['remembered', pre2.id], ['ignore', null], ['remembered', message2.id], ['remembered', worship2.id],
+  ]);
+  // Back to automatic
+  svc.setLink({ key: 'u:z', name: 'Sermon Slides', itemId: null });
+  assert.equal(svc.resolve(pl2.items[2], pl2).how, null);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'service.json'), 'utf8')).aliases['countdown loop'], 'pre service');
+});
