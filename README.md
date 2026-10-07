@@ -19,6 +19,15 @@ wireless mics with photos, RF, notes and checklists.
 
 ## Quick start
 
+**Mac (recommended):** get the code once with git (`git clone https://github.com/jendrisdrummer-jpg/WAVS-Dashboard.git ~/WAVS-Dashboard`), install [Node.js LTS](https://nodejs.org), then open the `WAVS-Dashboard` folder in Finder and double-click **Install WAVS Dashboard (Mac).command**. From then on:
+- It starts by itself whenever the Mac logs in, and restarts if it ever stops. You don't need Terminal.
+- Open it at **http://wavs.local** from any device on your network, or http://localhost:8080 on the Mac itself.
+- To update, go to **Settings → This computer → Check for updates**, then **Update now**.
+
+Windows: double-click **Install WAVS Dashboard (Windows).cmd**. Linux: `npm install && npm run service:install`.
+
+To try it from Terminal instead:
+
 ```bash
 npm install
 npm run demo          # every device simulated, no hardware needed
@@ -42,7 +51,8 @@ You don't need to edit a config file.
 | `/rf` | Every receiver channel, plus a frequency plot that flags carriers spaced too closely. |
 | `/admin` | **Service & People**: the order of service (Planning Center, the ProPresenter playlist, or typed in), people and photos, mic assignments. |
 | `/gear` | **Gear**: shows whether each receiver, switcher, ProPresenter and Planning Center is connected. Add, edit, **Test** and remove devices here. |
-| `/settings` | **Settings**: name, colour, logo, admin PIN, Planning Center, alert thresholds, organizations. |
+| `/settings` | **Settings**: accounts and invites, name, colour, logo, Planning Center, alert thresholds, organizations, updates. |
+| `/login`, `/join/<code>` | Sign in, or create an account from an invite link. |
 | `/comms/control` | **Comms**: the team list, who can talk and listen on each channel, cues, and the QR code phones scan to join. |
 | `/comms/engine` | The **comms engine**, which mixes the comms audio. Open it on the dashboard computer and leave it open. |
 | `https://<ip>:8443/comms` | **Comms on a phone**: sign in, then listen and talk. |
@@ -342,9 +352,40 @@ You can change the thresholds under `alerts:` in the config.
 - `npm test`: tests for the Shure (SLX-D/ULX-D/AD) and vMix parsers, alert rules, plan parsing,
   ProPresenter auto-tracking, organizations and settings validation.
 
+## Accounts and sign-in
+
+Everyone gets their own sign-in, replacing the shared admin PIN:
+1. Go to **Settings → Accounts & sign-in → Create the admin account**. This becomes the **owner** account, an admin in every organization. If an admin PIN was set, you need it once to claim the dashboard.
+2. Choose a role, click **Create invite link**, then text or email the link, or let people scan its QR code. They pick their own name and password. Links expire after 1, 7 or 30 days, and you can cancel them.
+3. Roles are **per organization**, so the same person can be crew at the church and a producer for the company:
+
+| Role | Can |
+|---|---|
+| **Crew** | Green room hand-offs (Picked up / On stage / Returned), notes and checklists, moving the plan along |
+| **Producer** | Everything crew can, plus the service plan, people and mics, dashboards, stage messages and comms control |
+| **Admin** | Everything, including gear, settings, organizations, accounts and updates |
+
+Viewing dashboards stays open on your network, so TVs and confidence monitors keep working. To make everyone sign in first, turn on **Require sign-in to view dashboards**. The comms phone page never needs an account: crew sign in to comms with their name.
+
+Forgotten password: an admin clicks **Reset password** and passes on the temporary password. People change their own password from their name in the top bar. Accounts, sessions and invites are stored in the data folder (`users.json`, `sessions.json`). Passwords are stored only as scrypt hashes.
+
 ## Running it permanently
 
-Any Mac, Windows or Linux computer with Node.js 18 or newer will work. To keep it running after
-a reboot, use `pm2` (`npm i -g pm2 && pm2 start server/index.js --name wavs && pm2 save && pm2
-startup`), or a systemd service, or a launchd agent. Give the computer a fixed IP so the
-dashboard URL doesn't change.
+The installer above sets the dashboard up as a background service:
+- macOS: a launchd agent, `~/Library/LaunchAgents/com.wavs.dashboard.plist`
+- Linux: a systemd user service
+- Windows: a hidden script in the Startup folder
+
+Its log is in the data folder under `logs/dashboard.log`.
+
+| Command (in the dashboard folder) | Does |
+|---|---|
+| `npm run service:status` | Is it set up and running? |
+| `npm run service:stop` / `service:start` | Stop it until the next login, or start it again |
+| `npm run service:uninstall` | Stop it starting by itself |
+
+While the service is running, `npm start` reports that the dashboard is already running instead of starting a second copy.
+
+**Address.** The dashboard announces itself as **wavs.local** on your network (Bonjour/mDNS). It also answers on port 80 when it can, so no `:8080` is needed. Macs, iPhones, iPads and Windows 10+ understand `.local` names; some Android phones don't, so use the IP shown in Settings → This computer for those. To use a different name, set `WAVS_NAME=grace` (then it's `http://grace.local`). Give the computer a fixed IP if Android devices will use it.
+
+**Updating.** In **Settings → This computer**, click **Check for updates**. It lists what's new, and **Update now** downloads and installs it. When the dashboard runs as the service, it restarts by itself and open screens reload. This needs a copy installed with git; ZIP downloads have to be replaced by hand. Your setup lives in the data folder, so updating never touches it.

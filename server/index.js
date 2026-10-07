@@ -16,6 +16,9 @@ import selfsigned from 'selfsigned';
 import { testDevice } from './testers.js';
 import { Tunnel, lanAddresses } from './tunnel.js';
 import { dataDirFor, oldDataCandidates, adoptOldData } from './datadir.js';
+import { Auth, RANK, sessionToken, sessionCookie } from './auth.js';
+import { localName, startLocalName, listenPort80 } from './localname.js';
+import { System } from './system.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
 // Planning Center) is per organization and edited in the browser. On first run the
@@ -27,14 +30,22 @@ if (!process.env.WAVS_DATA) {
   if (from) console.log(`[data] copied your existing setup from ${from}`);
 }
 console.log(`[data] saved in ${dataDir}`);
+// Running in the background: keep the log file from growing forever.
+if (process.env.WAVS_SERVICE === '1') {
+  const log = path.join(dataDir, 'logs', 'dashboard.log');
+  try { if (fs.statSync(log).size > 10 * 1024 * 1024) fs.truncateSync(log, 0); } catch { /* no log yet */ }
+}
+const system = new System(ROOT);
+const BOOT = crypto.randomUUID(); // changes on every start, so open screens can pick up a new version
 const orgs = new OrgRegistry(dataDir);
 orgs.migrate(cfg);
+const auth = new Auth(dataDir);
 
 let rt = null; // Runtime for the active organization
 
 function startRuntime() {
   const id = orgs.data.active || orgs.data.orgs[0].id;
-  const next = new Runtime({ orgId: id, dir: orgs.dir(id), settings: orgs.read(id) });
+  const next = new Runtime({ orgId: id, dir: orgs.dir(id), settings: orgs.read(id), accounts: () => auth.enabled });
   next.on('message', broadcast);
   next.start();
   rt = next;
@@ -48,9 +59,15 @@ function restartRuntime() {
   broadcast({ type: 'reload' });
 }
 
-function publicConfig() {
+function publicConfig(req) {
   const s = rt.settings;
   return {
+    auth: {
+      enabled: auth.enabled,
+      requireLogin: Boolean(auth.data.requireLogin),
+      user: req.user ? auth.view(req.user, rt.orgId) : null,
+      role: auth.enabled ? auth.roleIn(req.user, rt.orgId) : 'admin',
+    },
     org: { name: s.org.name, serviceName: s.org.serviceName, theme: s.org.theme, logo: Boolean(orgs.logoFile(rt.orgId)) },
     orgId: rt.orgId,
     orgs: orgs.list(),
@@ -63,7 +80,7 @@ function publicConfig() {
     switchers: s.switchers.map((x) => ({ id: x.id, name: x.name, me: x.me || 1 })),
     propresenter: s.propresenter.map((x) => ({ id: x.id, name: x.name })),
     planningCenter: Boolean(s.planningCenter),
-    pinRequired: Boolean(s.security.adminPin),
+    pinRequired: !auth.enabled && Boolean(s.security.adminPin),
   };
 }
 
@@ -76,6 +93,33 @@ app.use(express.json({ limit: '200kb' }));
 const requirePin = (req, res, next) => (checkPin(rt.settings.security.adminPin, req.get('x-admin-pin'))
   ? next()
   : res.status(401).json({ error: 'PIN required' }));
+
+// Who is signed in (session cookie).
+app.use((req, _res, next) => { req.user = auth.session(sessionToken(req)); next(); });
+
+/**
+ * Role needed for an action. Before the first account exists, the old admin PIN (if set) guards
+ * every change, as before. After that, signed-in roles do: crew < producer < admin.
+ */
+const need = (role) => (req, res, next) => {
+  if (!auth.enabled) return role === 'open' ? next() : requirePin(req, res, next);
+  if (role === 'open' && !auth.data.requireLogin) return next();
+  if (!req.user) return res.status(401).json({ error: 'Sign in to do that', login: true });
+  const have = auth.rank(req.user, rt.orgId);
+  const want = RANK[role] || 1;
+  if (have < want) return res.status(403).json({ error: have ? `That needs ${role} access. Ask an admin.` : `Your account doesn't have access to ${rt.settings.org.name}. Ask an admin.` });
+  next();
+};
+
+// "Require sign-in to view": everything except the sign-in pages, static files and the comms
+// phone page (crew sign in to comms with their name) needs a signed-in account.
+const PUBLIC = /^\/(login|join\/|api\/auth\/|css\/|js\/|vendor\/|logo$|comms$|api\/comms\/qr\.svg)/;
+app.use((req, res, next) => {
+  if (!auth.enabled || !auth.data.requireLogin || PUBLIC.test(req.path)) return next();
+  if (req.user && auth.rank(req.user, rt.orgId) >= 1) return next();
+  if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) return res.status(401).json({ error: 'Sign in first', login: true });
+  res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
+});
 
 const images = /^image\/(jpeg|png|webp|gif|heic|heif|svg\+xml)$/;
 const upload = multer({
@@ -92,42 +136,140 @@ const wrap = (fn) => async (req, res) => {
   try { await fn(req, res); } catch (e) { res.status(400).json({ error: e.message }); }
 };
 
-app.get('/api/config', (_req, res) => res.json(publicConfig()));
+app.get('/api/config', (req, res) => res.json(publicConfig(req)));
 app.get('/api/state', (_req, res) => res.json(rt.snapshot()));
-app.post('/api/pin/check', requirePin, (_req, res) => res.json({ ok: true }));
+app.post('/api/pin/check', need('admin'), (_req, res) => res.json({ ok: true }));
+
+// ---- accounts & sign in
+const signIn = (req, res, token) => res.setHeader('set-cookie', sessionCookie(token, { secure: req.secure }));
+const clientIp = (req) => req.socket.remoteAddress || '';
+// What the sign-in page needs (public, even when sign-in is required to view).
+app.get('/api/auth/status', (req, res) => res.json({
+  org: { name: rt.settings.org.name, theme: rt.settings.org.theme, logo: Boolean(orgs.logoFile(rt.orgId)) },
+  auth: { enabled: auth.enabled, user: req.user ? { name: req.user.name } : null, role: auth.roleIn(req.user, rt.orgId) },
+  pinRequired: !auth.enabled && Boolean(rt.settings.security.adminPin),
+}));
+app.post('/api/auth/owner', wrap((req, res) => {
+  // The first account. If the old admin PIN is set, it's needed to claim the dashboard.
+  if (rt.settings.security.adminPin && !checkPin(rt.settings.security.adminPin, req.body?.pin)) throw new Error('Enter the current admin PIN to create the owner account');
+  const u = auth.createOwner(req.body || {});
+  signIn(req, res, auth.startSession(u));
+  res.json({ ok: true });
+}));
+app.post('/api/auth/login', wrap((req, res) => {
+  signIn(req, res, auth.login(req.body?.username, req.body?.password, clientIp(req)));
+  res.json({ ok: true });
+}));
+app.post('/api/auth/logout', (req, res) => { auth.logout(sessionToken(req)); signIn(req, res, null); res.json({ ok: true }); });
+app.post('/api/auth/password', wrap((req, res) => {
+  if (!req.user) throw new Error('Sign in first');
+  auth.changePassword(req.user.id, req.body?.current, req.body?.next);
+  res.json({ ok: true });
+}));
+app.get('/api/auth/invite/:code', (req, res) => {
+  const inv = auth.findInvite(req.params.code);
+  if (!inv) return res.status(404).json({ error: 'This invite link has expired or was cancelled. Ask for a new one.' });
+  const org = orgs.data.orgs.find((o) => o.id === inv.orgId);
+  res.json({ org: org?.name || 'the dashboard', role: inv.role, signedIn: req.user ? req.user.name : null });
+});
+app.post('/api/auth/invite/:code', wrap((req, res) => {
+  const { token } = auth.acceptInvite(req.params.code, req.body || {}, clientIp(req));
+  signIn(req, res, token);
+  res.json({ ok: true });
+}));
+
+/** Address others can open: this request's host, unless that's "localhost" on this computer. */
+function shareBase(req) {
+  const host = req.get('host') || '';
+  if (!/^(localhost|127\.|\[::1\])/.test(host)) return `${req.protocol}://${host}`;
+  const port = cfg.server.port === 80 ? '' : `:${cfg.server.port}`;
+  if (localName.active) return `http://${localName.host}${localName.port80 ? '' : port}`;
+  const ip = lanAddresses()[0]?.address;
+  return ip ? `http://${ip}${port}` : `http://localhost${port}`;
+}
+
+app.get('/api/users', need('admin'), (req, res) => {
+  res.json({
+    users: auth.data.users.map((u) => auth.view(u, rt.orgId)),
+    invites: auth.data.invites.filter((i) => i.orgId === rt.orgId && i.expires > Date.now()).map((i) => ({ ...i, url: `${shareBase(req)}/join/${i.code}` })),
+    requireLogin: Boolean(auth.data.requireLogin),
+    orgs: orgs.data.orgs,
+  });
+});
+app.post('/api/users/invite', need('admin'), wrap((req, res) => {
+  const inv = auth.invite({ orgId: rt.orgId, role: req.body?.role, by: req.user?.id, days: req.body?.days, label: req.body?.label });
+  res.json({ ...inv, url: `${shareBase(req)}/join/${inv.code}` });
+}));
+app.delete('/api/users/invite/:code', need('admin'), wrap((req, res) => { auth.revokeInvite(req.params.code); res.json({ ok: true }); }));
+app.put('/api/users/:id/role', need('admin'), wrap((req, res) => {
+  if (req.params.id === req.user?.id) throw new Error("You can't change your own role");
+  auth.setRole(req.params.id, rt.orgId, req.body?.role || null);
+  res.json({ ok: true });
+}));
+app.post('/api/users/:id/reset', need('admin'), wrap((req, res) => res.json({ password: auth.resetPassword(req.params.id) })));
+app.delete('/api/users/:id', need('admin'), wrap((req, res) => {
+  if (!req.user?.owner) throw new Error('Only the owner can delete accounts. You can remove their access to this organization instead.');
+  auth.remove(req.params.id);
+  res.json({ ok: true });
+}));
+app.put('/api/auth/require-login', need('admin'), wrap((req, res) => { auth.setRequireLogin(req.body?.on); broadcast({ type: 'reload' }); res.json({ ok: true }); }));
+
+// ---- this computer: address, background service, version and updates (admins)
+app.get('/api/system', need('admin'), wrap(async (req, res) => {
+  const port = cfg.server.port;
+  res.json({
+    ...(await system.version()),
+    git: system.isGit,
+    root: ROOT,
+    dataDir,
+    service: { running: system.asService, installed: system.serviceInstalled(), platform: process.platform },
+    address: {
+      name: localName.active ? `http://${localName.host}${localName.port80 || port === 80 ? '' : `:${port}`}` : null,
+      ip: lanAddresses()[0] ? `http://${lanAddresses()[0].address}:${port}` : null,
+    },
+  });
+}));
+app.post('/api/system/check', need('admin'), wrap(async (_req, res) => res.json(await system.check())));
+app.post('/api/system/update', need('admin'), wrap(async (_req, res) => {
+  const r = await system.update();
+  res.json(r);
+  if (r.restart) system.restartSoon(); // screens reload by themselves when they reconnect (new boot id)
+}));
 
 // ---- organizations
 app.get('/api/orgs', (_req, res) => res.json({ active: rt.orgId, orgs: orgs.list() }));
-app.post('/api/orgs', requirePin, wrap((req, res) => {
+app.post('/api/orgs', need('admin'), wrap((req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) throw new Error('Give the organization a name');
   const id = orgs.create(name);
+  if (req.user && !req.user.owner) auth.setRole(req.user.id, id, 'admin');
   orgs.setActive(id);
   restartRuntime();
   res.json({ id });
 }));
-app.post('/api/orgs/active', requirePin, wrap((req, res) => {
+app.post('/api/orgs/active', need('admin'), wrap((req, res) => {
+  if (auth.enabled && auth.rank(req.user, String(req.body?.id)) < RANK.admin) throw new Error("You're not an admin of that organization");
   orgs.setActive(String(req.body?.id));
   restartRuntime();
   res.json({ ok: true });
 }));
-app.delete('/api/orgs/:id', requirePin, wrap((req, res) => { orgs.remove(req.params.id); broadcast({ type: 'reload' }); res.json({ ok: true }); }));
+app.delete('/api/orgs/:id', need('admin'), wrap((req, res) => { orgs.remove(req.params.id); broadcast({ type: 'reload' }); res.json({ ok: true }); }));
 
 // ---- settings (gear, branding, Planning Center, alerts) for the active organization
 app.get('/api/settings', (_req, res) => res.json(maskSettings(rt.settings)));
-app.put('/api/settings', requirePin, wrap((req, res) => {
+app.put('/api/settings', need('admin'), wrap((req, res) => {
   const next = mergeIncoming(rt.settings, req.body || {});
   orgs.write(rt.orgId, next);
   restartRuntime();
   res.json(maskSettings(next));
 }));
-app.post('/api/settings/test', requirePin, wrap(async (req, res) => {
+app.post('/api/settings/test', need('admin'), wrap(async (req, res) => {
   const { kind, device } = req.body || {};
   const dev = { ...device };
   if (kind === 'planningCenter' && dev.secret === '••••••••') dev.secret = rt.settings.planningCenter?.secret;
   res.json(await testDevice(kind, dev));
 }));
-app.post('/api/settings/logo', requirePin, logoUpload.single('logo'), wrap((req, res) => {
+app.post('/api/settings/logo', need('admin'), logoUpload.single('logo'), wrap((req, res) => {
   if (!req.file) throw new Error('Choose a PNG, JPEG or WebP image');
   const dir = orgs.dir(rt.orgId);
   const old = orgs.logoFile(rt.orgId);
@@ -136,72 +278,72 @@ app.post('/api/settings/logo', requirePin, logoUpload.single('logo'), wrap((req,
   broadcast({ type: 'reload' });
   res.json({ ok: true });
 }));
-app.delete('/api/settings/logo', requirePin, wrap((_req, res) => {
+app.delete('/api/settings/logo', need('admin'), wrap((_req, res) => {
   const old = orgs.logoFile(rt.orgId);
   if (old) fs.rmSync(path.join(orgs.dir(rt.orgId), old), { force: true });
   broadcast({ type: 'reload' });
   res.json({ ok: true });
 }));
-app.post('/api/gear/reconnect', requirePin, wrap((_req, res) => { restartRuntime(); res.json({ ok: true }); }));
+app.post('/api/gear/reconnect', need('admin'), wrap((_req, res) => { restartRuntime(); res.json({ ok: true }); }));
 
 // ---- people & mic assignments
-app.post('/api/people', requirePin, upload.single('photo'), wrap((req, res) => {
+app.post('/api/people', need('producer'), upload.single('photo'), wrap((req, res) => {
   res.json(rt.store.addPerson({ ...req.body, photo: req.file?.filename || null }));
 }));
-app.put('/api/people/:id', requirePin, upload.single('photo'), wrap((req, res) => {
+app.put('/api/people/:id', need('producer'), upload.single('photo'), wrap((req, res) => {
   const fields = { ...req.body };
   if (req.file) fields.photo = req.file.filename;
   else if (req.body.removePhoto === 'true') fields.photo = null;
   res.json(rt.store.updatePerson(req.params.id, fields));
 }));
-app.delete('/api/people/:id', requirePin, wrap((req, res) => { rt.store.removePerson(req.params.id); res.json({ ok: true }); }));
+app.delete('/api/people/:id', need('producer'), wrap((req, res) => { rt.store.removePerson(req.params.id); res.json({ ok: true }); }));
 
-app.put('/api/assignments/:micId', requirePin, wrap((req, res) => {
+app.put('/api/assignments/:micId', need('crew'), wrap((req, res) => {
   if (!rt.micSlots.some((m) => m.id === req.params.micId)) throw new Error('Unknown mic');
   const result = rt.store.assign(req.params.micId, req.body || {});
   if (rt.settings.control.pushNamesToReceivers && req.body?.personId !== undefined) rt.pushName(req.params.micId);
   res.json(result);
 }));
-app.post('/api/assignments/clear', requirePin, wrap((_req, res) => { rt.store.clearAssignments(); res.json({ ok: true }); }));
-app.put('/api/service', requirePin, wrap((req, res) => { rt.store.setService({ name: req.body?.name ?? null, notes: req.body?.notes ?? '' }); res.json(rt.store.data.service); }));
-app.post('/api/mics/:micId/push-name', requirePin, wrap((req, res) => {
+app.post('/api/assignments/clear', need('producer'), wrap((_req, res) => { rt.store.clearAssignments(); res.json({ ok: true }); }));
+app.put('/api/service', need('producer'), wrap((req, res) => { rt.store.setService({ name: req.body?.name ?? null, notes: req.body?.notes ?? '' }); res.json(rt.store.data.service); }));
+app.post('/api/mics/:micId/push-name', need('producer'), wrap((req, res) => {
   if (!rt.pushName(req.params.micId)) throw new Error('Receiver does not support naming or nobody is assigned');
   res.json({ ok: true });
 }));
 
 // ---- service plan (Planning Center or manual)
 app.get('/api/service', (_req, res) => res.json(rt.service.state()));
-app.post('/api/service/pco', requirePin, wrap(async (req, res) => {
+app.post('/api/service/pco', need('producer'), wrap(async (req, res) => {
   await rt.service.selectPco(String(req.body?.serviceTypeId), String(req.body?.planId));
   res.json(rt.service.state());
 }));
-app.post('/api/service/pco/refresh', requirePin, wrap(async (_req, res) => {
+app.post('/api/service/pco/refresh', need('producer'), wrap(async (_req, res) => {
   await rt.service.refreshUpcoming();
   await rt.service.reloadPco();
   res.json(rt.service.state());
 }));
-app.put('/api/service/manual', requirePin, wrap((req, res) => {
+app.put('/api/service/manual', need('producer'), wrap((req, res) => {
   rt.service.setManual({ title: String(req.body?.title || ''), text: String(req.body?.text || ''), start: String(req.body?.start || '') });
   res.json(rt.service.state());
 }));
-app.post('/api/service/propresenter', requirePin, wrap((_req, res) => { rt.service.useProPresenter(); res.json(rt.service.state()); }));
+app.post('/api/service/propresenter', need('producer'), wrap((_req, res) => { rt.service.useProPresenter(); res.json(rt.service.state()); }));
 // Moving through the plan is allowed without the PIN so any operator can follow along.
-app.post('/api/service/current', wrap((req, res) => { rt.service.setCurrent(req.body?.itemId || null, 'manual'); res.json({ ok: true }); }));
-app.post('/api/service/next', wrap((_req, res) => { rt.service.step(1); res.json({ ok: true }); }));
-app.post('/api/service/previous', wrap((_req, res) => { rt.service.step(-1); res.json({ ok: true }); }));
-app.post('/api/service/reset', requirePin, wrap((_req, res) => { rt.service.resetProgress(); res.json({ ok: true }); }));
+app.post('/api/service/current', need('open'), wrap((req, res) => { rt.service.setCurrent(req.body?.itemId || null, 'manual'); res.json({ ok: true }); }));
+app.post('/api/service/next', need('open'), wrap((_req, res) => { rt.service.step(1); res.json({ ok: true }); }));
+app.post('/api/service/previous', need('open'), wrap((_req, res) => { rt.service.step(-1); res.json({ ok: true }); }));
+app.post('/api/service/reset', need('producer'), wrap((_req, res) => { rt.service.resetProgress(); res.json({ ok: true }); }));
 
 // ---- shared notes & checklists (team-editable, no PIN)
-app.put('/api/notes/:name', wrap((req, res) => { rt.board.setNote(req.params.name, req.body?.text); res.json({ ok: true }); }));
-app.put('/api/checklists/:name', wrap((req, res) => { rt.board.setChecklist(req.params.name, req.body || {}); res.json({ ok: true }); }));
-app.post('/api/checklists/:name/toggle', wrap((req, res) => { rt.board.toggle(req.params.name, req.body?.itemId, req.body?.done); res.json({ ok: true }); }));
-app.post('/api/checklists/:name/reset', wrap((req, res) => { rt.board.resetChecklist(req.params.name); res.json({ ok: true }); }));
+app.put('/api/notes/:name', need('open'), wrap((req, res) => { rt.board.setNote(req.params.name, req.body?.text); res.json({ ok: true }); }));
+app.put('/api/checklists/:name', need('open'), wrap((req, res) => { rt.board.setChecklist(req.params.name, req.body || {}); res.json({ ok: true }); }));
+app.post('/api/checklists/:name/toggle', need('open'), wrap((req, res) => { rt.board.toggle(req.params.name, req.body?.itemId, req.body?.done); res.json({ ok: true }); }));
+app.post('/api/checklists/:name/reset', need('open'), wrap((req, res) => { rt.board.resetChecklist(req.params.name); res.json({ ok: true }); }));
 
 // ---- dashboards (layouts)
 app.get('/api/dashboards', (_req, res) => res.json(rt.dashboards.list()));
-app.post('/api/dashboards', requirePin, wrap((req, res) => res.json(rt.dashboards.create(req.body || {}))));
-app.put('/api/dashboards/:id', requirePin, wrap((req, res) => res.json(rt.dashboards.update(req.params.id, req.body || {}))));
-app.delete('/api/dashboards/:id', requirePin, wrap((req, res) => { rt.dashboards.remove(req.params.id); res.json({ ok: true }); }));
+app.post('/api/dashboards', need('producer'), wrap((req, res) => res.json(rt.dashboards.create(req.body || {}))));
+app.put('/api/dashboards/:id', need('producer'), wrap((req, res) => res.json(rt.dashboards.update(req.params.id, req.body || {}))));
+app.delete('/api/dashboards/:id', need('producer'), wrap((req, res) => { rt.dashboards.remove(req.params.id); res.json({ ok: true }); }));
 
 // ---- ProPresenter
 app.get('/api/propresenter/:id/thumbnail/:uuid/:index', async (req, res) => {
@@ -211,7 +353,7 @@ app.get('/api/propresenter/:id/thumbnail/:uuid/:index', async (req, res) => {
     res.set('content-type', img.type).set('cache-control', 'max-age=30').send(img.body);
   } catch { res.status(502).end(); }
 });
-app.post('/api/propresenter/:id/stage-message', requirePin, wrap(async (req, res) => {
+app.post('/api/propresenter/:id/stage-message', need('producer'), wrap(async (req, res) => {
   if (!rt.settings.control.propresenterStageMessage) throw new Error('Stage messages are turned off (Settings → Remote control)');
   const pp = rt.propresenters[req.params.id];
   if (!pp) throw new Error('Unknown ProPresenter');
@@ -228,7 +370,8 @@ app.get('/api/comms/info', (_req, res) => {
     // Same Wi-Fi: every address this computer has (best guess first), plus its Bonjour name.
     lan: [
       ...ips.map((i) => ({ url: `https://${i.address}:${tlsPort}/comms`, label: `${i.address} (${i.iface})`, likely: i.likely })),
-      { url: `https://${local}.local:${tlsPort}/comms`, label: `${local}.local (name)`, likely: false },
+      ...(localName.active ? [{ url: `https://${localName.host}:${tlsPort}/comms`, label: `${localName.host} (name)`, likely: false }] : []),
+      { url: `https://${local}.local:${tlsPort}/comms`, label: `${local}.local (computer name)`, likely: false },
     ],
     joinUrls: ips.map((i) => `https://${i.address}:${tlsPort}/comms`),
     hostname: os.hostname(),
@@ -236,7 +379,7 @@ app.get('/api/comms/info', (_req, res) => {
     remote: { ...tunnel.state, enabled: tunnel.enabled, url: tunnel.state.url ? `${tunnel.state.url}/comms` : null },
   });
 });
-app.post('/api/comms/remote', requirePin, wrap(async (req, res) => {
+app.post('/api/comms/remote', need('admin'), wrap(async (req, res) => {
   tunnel.enable(Boolean(req.body?.on)); // starts in the background; status comes back through /api/comms/info
   res.json({ ok: true });
 }));
@@ -252,6 +395,7 @@ const pages = {
   '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html',
   '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/gear': 'gear.html', '/settings': 'settings.html',
   '/comms': 'comms.html', '/comms/control': 'comms-control.html', '/comms/engine': 'comms-engine.html',
+  '/login': 'login.html', '/join/:code': 'login.html',
 };
 for (const [route, file] of Object.entries(pages)) app.get(route, (_req, res) => res.sendFile(path.join(pub, file)));
 app.get('/uploads/:file', (req, res) => res.sendFile(path.join(rt.store.uploads, path.basename(req.params.file)), { maxAge: '1h' }, (e) => e && res.status(404).end()));
@@ -273,6 +417,13 @@ commsWss.on('connection', (ws, req) => rt.comms.attach(ws, req));
 
 function upgrade(req, socket, head) {
   req.viaTunnel = false;
+  req.user = auth.session(sessionToken(req));
+  req.authRank = auth.enabled ? auth.rank(req.user, rt.orgId) : 0;
+  const { pathname: p } = new URL(req.url, 'http://x');
+  if (p === '/ws' && auth.enabled && auth.data.requireLogin && req.authRank < 1) {
+    socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    return;
+  }
   const { pathname } = new URL(req.url, 'http://x');
   if (pathname === '/ws') wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   else if (pathname === '/comms-ws') commsWss.handleUpgrade(req, socket, head, (ws) => commsWss.emit('connection', ws, req));
@@ -310,7 +461,7 @@ async function tlsOptions() {
   const certFile = path.join(dir, 'cert.pem');
   if (!fs.existsSync(keyFile)) {
     fs.mkdirSync(dir, { recursive: true });
-    const altNames = [{ type: 2, value: 'localhost' }, { type: 2, value: os.hostname() }, { type: 2, value: `${os.hostname().replace(/\.local$/, '')}.local` },
+    const altNames = [{ type: 2, value: 'localhost' }, { type: 2, value: localName.host || 'wavs.local' }, { type: 2, value: os.hostname() }, { type: 2, value: `${os.hostname().replace(/\.local$/, '')}.local` },
       { type: 7, ip: '127.0.0.1' }, ...lanAddresses().map((i) => ({ type: 7, ip: i.address }))];
     const pems = await selfsigned.generate([{ name: 'commonName', value: 'WAVS Dashboard' }], { days: 3650, keySize: 2048, algorithm: 'sha256', extensions: [{ name: 'subjectAltName', altNames }] });
     fs.writeFileSync(keyFile, pems.private, { mode: 0o600 });
@@ -327,7 +478,7 @@ function broadcast(msg) {
 wss.on('connection', (ws) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  ws.send(JSON.stringify(rt.snapshot()));
+  ws.send(JSON.stringify({ ...rt.snapshot(), boot: BOOT }));
 });
 setInterval(() => {
   for (const ws of wss.clients) {
@@ -340,9 +491,26 @@ setInterval(() => {
 // ---------------------------------------------------------------- start
 
 startRuntime();
-server.listen(cfg.server.port, cfg.server.host, () => {
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\nThe dashboard is already running (port ${cfg.server.port} is in use).`);
+    console.error(`If you set it to start by itself, it's running in the background: open http://localhost:${cfg.server.port}`);
+    console.error('To stop the background copy: npm run service:stop\n');
+    process.exit(1);
+  }
+  throw e;
+});
+server.listen(cfg.server.port, cfg.server.host, async () => {
   console.log(`WAVS Dashboard running: http://localhost:${cfg.server.port}`);
   console.log(`  Organizations: ${orgs.list().map((o) => o.name).join(', ')}`);
+  await startLocalName();
+  // http://wavs.local without ":8080" when port 80 is free (allowed for normal users on macOS).
+  if (cfg.server.port !== 80) {
+    const plain = http.createServer(app);
+    plain.on('upgrade', upgrade);
+    await listenPort80(plain, cfg.server.host);
+  }
+  if (localName.active) console.log(`  On this network: http://${localName.host}${localName.port80 || cfg.server.port === 80 ? '' : `:${cfg.server.port}`}`);
 });
 if (tlsPort) {
   tlsOptions().then((opts) => {
@@ -360,6 +528,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     rt?.stop();
     tunnel.stop();
+    localName.stop?.();
     server.close();
     process.exit(0);
   });

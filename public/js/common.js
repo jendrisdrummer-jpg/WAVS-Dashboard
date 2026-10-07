@@ -32,9 +32,17 @@ export function requestRender() {
 }
 
 export async function start({ page }) {
-  store.config = await (await fetch('/api/config')).json();
-  // A new organization goes through the setup wizard first.
-  if (!store.config.setupComplete && !['welcome', 'settings', 'gear'].includes(page)) {
+  const res = await fetch('/api/config');
+  if (res.status === 401) { location.replace(`/login?next=${encodeURIComponent(location.pathname + location.search)}`); await new Promise(() => {}); }
+  store.config = await res.json();
+  // Pages for a higher role than this account has: back to Home (the server enforces it anyway).
+  const need = PAGE_ROLE[page];
+  if (need && !can(need)) {
+    location.replace(store.config.auth?.user ? '/' : `/login?next=${encodeURIComponent(location.pathname)}`);
+    await new Promise(() => {});
+  }
+  // A new organization goes through the setup wizard first (only admins can run it).
+  if (!store.config.setupComplete && can('admin') && !['welcome', 'settings', 'gear'].includes(page)) {
     location.replace('/welcome');
     await new Promise(() => {});
   }
@@ -65,6 +73,9 @@ function connect() {
     const msg = JSON.parse(ev.data);
     switch (msg.type) {
       case 'snapshot':
+        // The dashboard restarted with a new version (e.g. after "Update now"): load it.
+        if (store.boot && msg.boot && store.boot !== msg.boot && !store.holdReload) { location.reload(); return; }
+        store.boot = msg.boot;
         Object.assign(store, {
           state: msg.state, slots: msg.slots, greenroom: msg.greenroom,
           service: msg.service, board: msg.board, dashboards: msg.dashboards, comms: msg.comms || store.comms, ready: true,
@@ -147,6 +158,17 @@ export const ICONS = {
 };
 export const icon = (name, cls = 'ic') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
+/** What the current account may do: 'crew' < 'producer' < 'admin'. Without accounts everyone is admin. */
+const RANKS = { crew: 1, producer: 2, admin: 3 };
+export function can(role) {
+  const a = store.config?.auth;
+  if (!a?.enabled) return true;
+  return (RANKS[a.role] || 0) >= RANKS[role];
+}
+const PAGE_ROLE = { gear: 'admin', settings: 'admin', welcome: 'admin', admin: 'producer' };
+// Comms control also opens for comms leads on their phones (checked by the comms server), so it's only hidden from the menu.
+const NAV_ROLE = { ...PAGE_ROLE, comms: 'producer' };
+
 export const NAV = [
   ['/', 'Home', 'home', 'home'],
   ['/dashboards', 'Dashboards', 'dash', 'grid'],
@@ -172,16 +194,17 @@ function renderHeader(page) {
           <div class="org-menu-head">Organization</div>
           ${cfg.orgs.map((o) => `<button role="menuitem" data-org="${esc(o.id)}" class="${o.id === cfg.orgId ? 'cur' : ''}">
             <span class="org-dot" style="background:${esc(o.color)}"></span>${esc(o.name)}${o.id === cfg.orgId ? icon('check') : ''}</button>`).join('')}
-          <hr><button role="menuitem" data-org-add>${icon('plus')} Add organization</button>
-          <a role="menuitem" href="/settings">${icon('settings')} Organization settings</a>
+          ${can('admin') ? `<hr><button role="menuitem" data-org-add>${icon('plus')} Add organization</button>
+          <a role="menuitem" href="/settings">${icon('settings')} Organization settings</a>` : ''}
         </div>
       </div>
       <div data-slot class="slot"></div>
       <nav class="nav">
-        ${NAV.map(([href, label, id, ic]) => `<a href="${href}" class="${id === page ? 'active' : ''}" title="${label}">${icon(ic)}<span>${label}</span></a>`).join('')}
+        ${NAV.filter(([, , id]) => !NAV_ROLE[id] || can(NAV_ROLE[id])).map(([href, label, id, ic]) => `<a href="${href}" class="${id === page ? 'active' : ''}" title="${label}">${icon(ic)}<span>${label}</span></a>`).join('')}
       </nav>
       <div class="spacer"></div>
       <div data-slot-right class="slot"></div>
+      ${accountChip()}
       <span class="conn" data-conn>Offline</span>
       <span class="clock" data-clock></span>
     </div>
@@ -214,6 +237,40 @@ function renderHeader(page) {
     header.querySelector('[data-service]').textContent = store.greenroom.service?.name || cfg.org.serviceName || '';
   });
 }
+
+function accountChip() {
+  const a = store.config.auth;
+  if (!a?.enabled) return '';
+  if (!a.user) return `<a class="btn small acct-signin" href="/login?next=${encodeURIComponent(location.pathname)}">Sign in</a>`;
+  return `<div class="acct-wrap"><button class="acct-btn" type="button" aria-haspopup="menu" title="${esc(a.user.name)}">
+      <span class="acct-mark">${esc(initials(a.user.name))}</span><span class="acct-text"><b>${esc(a.user.name.split(' ')[0])}</b><small>${esc(a.role || 'no access')}</small></span></button>
+    <div class="acct-menu hidden" role="menu">
+      <div class="org-menu-head">${esc(a.user.username)}</div>
+      ${can('admin') ? '<a role="menuitem" href="/settings#accounts">Accounts &amp; invites</a>' : ''}
+      <button role="menuitem" data-acct="password">Change password</button>
+      <button role="menuitem" data-acct="logout">Sign out</button>
+    </div></div>`;
+}
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.acct-btn');
+  const menu = document.querySelector('.acct-menu');
+  if (!menu) return;
+  if (btn) { menu.classList.toggle('hidden'); return; }
+  if (!menu.contains(e.target)) { menu.classList.add('hidden'); return; }
+  const act = e.target.closest('[data-acct]')?.dataset.acct;
+  if (act === 'logout') {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    location.href = '/login';
+  }
+  if (act === 'password') {
+    const current = prompt('Your current password');
+    if (current == null) return;
+    const next = prompt('New password (at least 8 characters)');
+    if (!next) return;
+    try { await api('POST', '/api/auth/password', { current, next }); toast('Password changed'); } catch (err) { toast(err.message, true); }
+  }
+});
 
 function tickClock() {
   const el = document.querySelector('[data-clock]');
@@ -317,6 +374,10 @@ export async function api(method, url, body) {
     payload = JSON.stringify(body);
   }
   const res = await fetch(url, { method, headers, body: payload });
+  if (res.status === 401 && store.config?.auth?.enabled) {
+    location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+    await new Promise(() => {});
+  }
   if (res.status === 401) {
     const entered = prompt('Enter the admin PIN');
     if (entered == null) throw new Error('PIN required');

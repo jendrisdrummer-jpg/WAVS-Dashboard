@@ -802,3 +802,35 @@ body.as-lead .lead-only-hide { display: none !important; }
 .cc-help summary { cursor: pointer; color: var(--text-2); font-weight: 600; font-size: 13px; }
 .cc-help ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; color: var(--text-2); }
 .f.small span { font-size: 12px; }
+
+/* sign-in page, account menu, accounts & this-computer settings */
+.auth-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
+.auth-card { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px; display: grid; gap: 14px; }
+.auth-card h1 { margin: 0; font-size: 24px; }
+.auth-card p { margin: 0; }
+.auth-card input { padding: 12px; font-size: 16px; }
+.auth-brand img { height: 44px; max-width: 160px; object-fit: contain; }
+.auth-brand .org-mark { width: 44px; height: 44px; font-size: 16px; }
+.acct-wrap { position: relative; }
+.acct-btn { display: flex; align-items: center; gap: 8px; background: none; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 3px; cursor: pointer; }
+.acct-btn:hover { border-color: var(--accent); }
+.acct-mark { width: 28px; height: 28px; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line); display: grid; place-items: center; font-size: 11px; font-weight: 800; flex: none; }
+.acct-text { display: grid; line-height: 1.1; text-align: left; }
+.acct-text small { color: var(--muted); font-size: 11px; text-transform: capitalize; }
+.acct-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px; box-shadow: 0 12px 40px rgba(0, 0, 0, .5); display: grid; }
+.acct-menu button, .acct-menu a { text-align: left; padding: 10px; border: 0; background: none; border-radius: 8px; cursor: pointer; text-decoration: none; font-size: 14px; }
+.acct-menu button:hover, .acct-menu a:hover { background: var(--panel-2); }
+@media (max-width: 1350px) { .acct-text { display: none; } .acct-btn { padding: 3px; } }
+.sub-h { margin: 18px 0 8px; font-size: 14px; }
+.acct-invite { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.acct-invite input[type=text] { flex: 1 1 200px; }
+.acct-newinvite { display: flex; gap: 14px; align-items: flex-start; margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: 12px; }
+.acct-newinvite > div { display: grid; gap: 6px; min-width: 0; }
+.acct-invites, .acct-list { display: grid; gap: 6px; margin-top: 10px; }
+.acct-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 8px 10px; background: var(--panel-2); border-radius: 10px; }
+.acct-row > span:nth-child(2) { flex: 1 1 180px; min-width: 0; }
+.sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 12px; }
+.sys-grid > div { display: grid; gap: 4px; align-content: start; }
+.sys-update { padding: 10px 0; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+.upd-list { margin: 4px 0; padding-left: 18px; }
+.auth-card .btn.big { justify-content: center; }

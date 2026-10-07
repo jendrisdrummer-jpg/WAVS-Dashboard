@@ -1,5 +1,5 @@
 // Comms control: for the producer (admin PIN) or a lead (signed in on comms as a lead).
-import { start, esc, setHTML, toast, api } from './common.js';
+import { start, store, esc, setHTML, toast, api } from './common.js';
 
 await start({ page: 'comms' });
 
@@ -19,6 +19,10 @@ function connect() {
     else if (msg.t === 'levels') { levels = msg.levels; meters(); }
     else if (msg.t === 'reload') location.reload();
     else if (msg.t === 'error') {
+      if (msg.error === 'PIN required' && store.config.auth?.enabled) {
+        $('sub').innerHTML = 'Comms control needs a producer or admin account. <a href="/login?next=/comms/control">Sign in</a>';
+        return;
+      }
       if (msg.error === 'PIN required') {
         const pin = prompt('Enter the admin PIN to control comms');
         if (pin == null) { $('sub').textContent = 'The admin PIN is needed to control comms.'; return; }

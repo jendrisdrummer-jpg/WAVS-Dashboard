@@ -32,7 +32,7 @@ export function checkPin(expected, given) {
  * settings) stops this and starts a new one. Emits 'message' for the browser.
  */
 export class Runtime extends EventEmitter {
-  constructor({ orgId, dir, settings }) {
+  constructor({ orgId, dir, settings, accounts = () => false }) {
     super();
     this.orgId = orgId;
     this.settings = settings;
@@ -45,7 +45,8 @@ export class Runtime extends EventEmitter {
       pco: settings.planningCenter ? new PlanningCenter(settings.planningCenter) : null,
       cfg: settings.service,
     });
-    this.comms = new Comms(dir, { checkPin: (pin) => checkPin(settings.security.adminPin, pin), orgName: settings.org.name });
+    // Once accounts exist the PIN no longer opens anything; signed-in roles do instead.
+    this.comms = new Comms(dir, { checkPin: (pin) => !accounts() && checkPin(settings.security.adminPin, pin), orgName: settings.org.name });
     this.alerts = [];
     this.buildDevices();
   }
