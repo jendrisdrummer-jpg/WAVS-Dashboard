@@ -917,3 +917,56 @@ body.as-lead .lead-only-hide { display: none !important; }
 .ppl-i.cur { background: var(--accent); color: #fff; font-weight: 700; }
 .ppl-i.done { opacity: .5; }
 .pps { display: grid; gap: 8px; }
+
+/* ---------------------------------------------------------------- auto-fit widgets
+   The widget's box is the size reference (container query units: 1cqh = 1% of its height,
+   1cqw = 1% of its width), so dragging the corner makes the contents bigger or smaller.
+   --fit is the A−/A+ adjustment (1 = automatic). Small boxes switch to a compact look. */
+.wbody { container-type: size; container-name: w; }
+.wbody.autofit { padding: 6px 8px; overflow: hidden; }
+.autofit .big-stat b { font-size: calc(clamp(11px, min(38cqh, 17cqw), 260px) * var(--fit)); }
+.autofit .big-stat small, .autofit .big-stat span { font-size: calc(clamp(9px, min(9cqh, 5cqw), 28px) * var(--fit)); }
+.autofit .ci { gap: 2cqh; }
+.autofit .ci-title { font-size: calc(clamp(10px, min(12cqh, 8cqw), 64px) * var(--fit)); }
+.autofit .ci-time { font-size: calc(clamp(11px, min(34cqh, 19cqw), 240px) * var(--fit)); }
+.autofit .ci-sub, .autofit .ci-next { font-size: calc(clamp(11px, min(7cqh, 4.5cqw), 26px) * var(--fit)); }
+.autofit .big-timer b { font-size: calc(clamp(11px, min(44cqh, 20cqw), 300px) * var(--fit)); }
+.autofit .big-timer small, .autofit .big-timer span { font-size: calc(clamp(10px, min(9cqh, 5cqw), 30px) * var(--fit)); }
+.autofit .timers { height: 100%; grid-auto-rows: 1fr; }
+.autofit .timer { padding: 0 2cqw; min-height: 0; }
+.autofit .timer span { font-size: calc(clamp(11px, min(28cqh / var(--n, 1), 6cqw), 32px) * var(--fit)); }
+.autofit .timer b { font-size: calc(clamp(11px, min(55cqh / var(--n, 1), 13cqw), 160px) * var(--fit)); }
+.autofit .pp-media { gap: 3cqh; }
+.autofit .pm-name { font-size: calc(clamp(11px, min(10cqh, 6cqw), 34px) * var(--fit)); }
+.autofit .pm-time { font-size: calc(clamp(11px, min(38cqh, 18cqw), 260px) * var(--fit)); }
+.autofit .pm-bar { height: max(4px, 4cqh); }
+.autofit .ps-text { font-size: calc(clamp(10px, min(14cqh, 7cqw), 120px) * var(--fit)); }
+.autofit .pp-slide-w.both .ps.next .ps-text { font-size: calc(clamp(11px, min(8cqh, 4.5cqw), 70px) * var(--fit)); }
+.autofit .vw-total b { font-size: calc(clamp(11px, min(26cqh, 22cqw), 200px) * var(--fit)); }
+.autofit .vw-total small { font-size: calc(clamp(10px, min(5cqh, 4cqw), 22px) * var(--fit)); }
+.autofit .cm-pb-text { font-size: calc(clamp(11px, min(14cqh, 7cqw), 110px) * var(--fit)); }
+.autofit .cm-pb-author { font-size: calc(clamp(11px, min(7cqh, 4cqw), 40px) * var(--fit)); }
+.autofit .w-text:not([style*="font-size"]) { font-size: calc(clamp(10px, min(30cqh, 12cqw), 240px) * var(--fit)); }
+/* the timeline: taller strip = bigger blocks and text (more items still appear as it gets wider) */
+.autofit .tl { padding: 4px; gap: max(4px, 3cqh); }
+.autofit .tl-i { width: calc(clamp(100px, 150cqh, 420px) * var(--fit)); padding: 4cqh 6px; }
+.autofit .tl-i.cur { width: calc(clamp(130px, 190cqh, 520px) * var(--fit)); }
+.autofit .tl.by-length .tl-i, .autofit .tl.by-length .tl-i.cur { width: auto; min-width: calc(clamp(80px, 110cqh, 300px) * var(--fit)); }
+.autofit .tl-n { font-size: calc(clamp(11px, 13cqh, 40px) * var(--fit)); }
+.autofit .tl-l { font-size: calc(clamp(12px, 16cqh, 48px) * var(--fit)); }
+.autofit .tl-i.cur .tl-l { font-size: calc(clamp(15px, 24cqh, 72px) * var(--fit)); }
+.autofit .tl-top { font-size: calc(clamp(9px, 9cqh, 24px) * var(--fit)); }
+
+/* compact looks when a fitting widget is small */
+@container w (max-height: 110px) {
+  .ci-next, .ci-bar, .ci-sub { display: none; }
+  .big-stat span, .big-timer span { display: none; }
+  .pm-bar, .pp-media small { display: none; }
+  .vw-graph { display: none; }
+}
+@container w (max-height: 70px) {
+  .ci-title, .big-stat small, .big-timer small, .pm-name { display: none; }
+  .tl-top { display: none; }
+}
+@container w (max-height: 170px) { .vw-list { display: none; } }
+@container w (max-width: 160px) { .vw-total small, .tl-h { display: none; } }

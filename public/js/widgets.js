@@ -61,6 +61,7 @@ export const WIDGETS = {
 
   'pp-timers': {
     title: 'ProPresenter timers', icon: '⏱️', category: 'Slides', size: { w: 3, h: 3 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [
       { key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices },
       { key: 'only', label: 'Only these timers (names, comma-separated; empty = all)', type: 'text', placeholder: 'e.g. Service, Sermon' },
@@ -84,7 +85,7 @@ export const WIDGETS = {
             const t = timers[0];
             return setHTML(body, `<div class="big-timer ${tone(t)} ${t.state === 'running' ? 'running' : ''}"><small>${esc(t.name)}</small><b class="mono">${esc(String(t.time).replace(/^00:/, ''))}</b><span class="muted small">${esc(t.state || '')}</span></div>`);
           }
-          setHTML(body, `<div class="timers">${timers.map((t) => `
+          setHTML(body, `<div class="timers" style="--n:${timers.length}">${timers.map((t) => `
             <div class="timer ${t.state === 'running' ? 'running' : ''} ${tone(t)}"><span>${esc(t.name)}</span><b class="mono">${esc(String(t.time).replace(/^00:/, ''))}</b></div>`).join('')}</div>`);
         },
       };
@@ -93,6 +94,7 @@ export const WIDGETS = {
 
   'pp-media': {
     title: 'Video countdown', icon: '🎬', category: 'Slides', size: { w: 3, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [
       { key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices },
       { key: 'layer', label: 'Layer', type: 'select', choices: () => [['any', 'Whatever is playing'], ['presentation', 'Presentation (videos on slides)'], ['announcement', 'Announcements'], ['audio', 'Audio']] },
@@ -123,22 +125,23 @@ export const WIDGETS = {
 
   'pp-slide': {
     title: 'Current slide', icon: '🔤', category: 'Slides', size: { w: 4, h: 3 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [
       { key: 'pp', label: 'ProPresenter', type: 'select', choices: ppChoices },
       { key: 'which', label: 'Show', type: 'select', choices: () => [['current', 'Current slide'], ['next', 'Next slide'], ['both', 'Current and next']] },
       { key: 'notes', label: 'Show slide notes', type: 'checkbox' },
-      { key: 'size', label: 'Text size (px)', type: 'number', default: 26 },
+      { key: 'size', label: 'Text size in px (empty = fit the widget)', type: 'number', default: '' },
     ],
     presets: [
       { name: 'Current slide (text)', icon: '🔤', size: { w: 4, h: 3 }, options: {} },
-      { name: 'Next slide (text)', icon: '⏭️', size: { w: 3, h: 2 }, options: { which: 'next', size: 18, title: 'Next slide' } },
+      { name: 'Next slide (text)', icon: '⏭️', size: { w: 3, h: 2 }, options: { which: 'next', title: 'Next slide' } },
     ],
     mount(body, opts) {
       return {
         update() {
           const pp = store.state.propresenter[opts.pp || ppChoices()[0]?.[0]];
           if (!pp?.online) return setHTML(body, empty('ProPresenter offline'));
-          const part = (s, label, cls) => `<div class="ps ${cls}">${label ? `<small class="muted">${label}</small>` : ''}<div class="ps-text" style="font-size:${Number(cls === 'next' && opts.which === 'both' ? opts.size * 0.6 : opts.size) || 26}px">${esc(s?.text || '') || '<span class="muted">(blank)</span>'}</div>
+          const part = (s, label, cls) => `<div class="ps ${cls}">${label ? `<small class="muted">${label}</small>` : ''}<div class="ps-text" style="${Number(opts.size) ? `font-size:${cls === 'next' && opts.which === 'both' ? opts.size * 0.6 : opts.size}px` : ''}">${esc(s?.text || '') || '<span class="muted">(blank)</span>'}</div>
             ${opts.notes && s?.notes ? `<div class="ps-notes">${esc(s.notes)}</div>` : ''}</div>`;
           body.querySelector('.pp-slide-w')?.classList.toggle('both', opts.which === 'both');
           const html = opts.which === 'next' ? part(pp.next, '', 'next')
@@ -350,6 +353,7 @@ export const WIDGETS = {
 
   timeline: {
     title: 'Service timeline', icon: '🎞️', category: 'Service', size: { w: 12, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
     presets: [
       { name: 'Service timeline (strip)', icon: '🎞️', size: { w: 12, h: 2 }, options: {} },
       { name: 'Service timeline (by length)', icon: '📏', size: { w: 12, h: 2 }, options: { sizing: 'length' } },
@@ -416,6 +420,7 @@ export const WIDGETS = {
 
   'current-item': {
     title: 'Current item', icon: '⏳', category: 'Service', size: { w: 3, h: 3 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [{ key: 'controls', label: 'Show Previous / Next buttons', type: 'checkbox' }],
     mount(body, opts, ctx) {
       body.addEventListener('click', (e) => {
@@ -442,6 +447,7 @@ export const WIDGETS = {
 
   'service-clock': {
     title: 'Service clock', icon: '🕘', category: 'Service', size: { w: 3, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [],
     mount(body) {
       return {
@@ -455,6 +461,7 @@ export const WIDGETS = {
 
   clock: {
     title: 'Clock', icon: '🕑', category: 'Service', size: { w: 3, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [{ key: 'seconds', label: 'Show seconds', type: 'checkbox', default: true }],
     mount(body, opts) {
       return {
@@ -524,6 +531,7 @@ export const WIDGETS = {
   // ------------------------------------------------------------------ live stream
   viewers: {
     title: 'Live viewers', icon: '📈', category: 'Stream', size: { w: 3, h: 3 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [
       { key: 'perPlatform', label: 'Show each platform', type: 'checkbox', default: true },
       { key: 'graph', label: 'Show the last hour as a graph', type: 'checkbox', default: true },
@@ -557,6 +565,7 @@ export const WIDGETS = {
 
   comments: {
     title: 'Stream comments', icon: '💬', category: 'Stream', size: { w: 4, h: 6 },
+    fit: (o) => o.filter === 'pinned', // the big pinned comment fills its box; the feed shows more comments instead
     options: [
       { key: 'filter', label: 'Show', type: 'select', choices: () => [['all', 'All comments'], ['flagged', 'Questions and prayer requests'], ['question', 'Questions only'], ['prayer', 'Prayer requests only'], ['pinned', 'Only the pinned comment (big, for a host or confidence screen)']] },
       { key: 'platforms', label: 'Platforms', type: 'select', choices: () => [['all', 'All'], ['youtube', 'YouTube'], ['facebook', 'Facebook']] },
@@ -726,13 +735,14 @@ export const WIDGETS = {
 
   text: {
     title: 'Text', icon: '🔤', category: 'Team', size: { w: 3, h: 2 },
+    fit: true, // contents grow and shrink with the widget's box
     options: [
       { key: 'text', label: 'Text', type: 'textarea' },
-      { key: 'size', label: 'Text size (px)', type: 'number', default: 28 },
+      { key: 'size', label: 'Text size in px (empty = fit the widget)', type: 'number', default: '' },
       { key: 'align', label: 'Align', type: 'select', choices: () => [['center', 'Center'], ['left', 'Left']] },
     ],
     mount(body, opts) {
-      body.innerHTML = `<div class="w-text" style="font-size:${Number(opts.size) || 28}px;text-align:${opts.align === 'left' ? 'left' : 'center'}">${esc(opts.text || '')}</div>`;
+      body.innerHTML = `<div class="w-text" style="${Number(opts.size) ? `font-size:${Number(opts.size)}px;` : ''}text-align:${opts.align === 'left' ? 'left' : 'center'}">${esc(opts.text || '')}</div>`;
       return { update() {} };
     },
   },

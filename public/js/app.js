@@ -87,21 +87,38 @@ const step = (v, dir) => {
 /** A widget's own size, or the dashboard's. */
 const sizeOf = (def) => Number(def.options?.zoom) || current?.scale || 100;
 
-/** Scale everything inside the widget (text, photos, meters) while it still fills its box. */
+/** Big-number widgets (clock, timers, countdowns…) size their contents from the widget's box. */
+function fits(def) {
+  const f = WIDGETS[def.type]?.fit;
+  return typeof f === 'function' ? Boolean(f({ ...defaultsFor(def.type), ...def.options })) : Boolean(f);
+}
+
+/**
+ * Content size. Fitting widgets: contents fill the box as you resize it, and A−/A+ make that a bit
+ * smaller or bigger (--fit). Other widgets (lists, feeds, tables): everything inside is scaled, and
+ * a bigger box shows more rather than bigger.
+ */
 function applySize(entry) {
   const z = sizeOf(entry.def) / 100;
   const wb = entry.content?.querySelector('.wbody');
   if (!wb) return;
-  wb.classList.toggle('scaled', z !== 1);
+  const fit = fits(entry.def);
+  wb.classList.toggle('autofit', fit);
+  wb.classList.toggle('scaled', !fit && z !== 1);
   wb.style.setProperty('--z', z);
+  wb.style.setProperty('--fit', fit ? z : 1);
   const tag = entry.content.querySelector('.wsize');
-  if (tag) tag.textContent = `${Math.round(z * 100)}%`;
+  if (tag) {
+    const manual = Boolean(Number(entry.def.options?.zoom));
+    tag.textContent = fit && !manual && z === 1 ? 'Auto' : `${Math.round(z * 100)}%`;
+    tag.title = manual ? 'Click to go back to automatic size' : fit ? 'Fits the widget: drag the corner to resize' : 'Same as the dashboard';
+  }
 }
 
 const COMMON_OPTIONS = [
   { key: 'title', label: 'Title', type: 'text', group: 'Widget' },
   { key: 'hideTitle', label: 'Hide the title bar', type: 'checkbox', group: 'Widget' },
-  { key: 'zoom', label: 'Content size', type: 'select', group: 'Widget', default: '', choices: () => [['', 'Same as dashboard'], ...SIZES.map((v) => [String(v), `${v}%`])] },
+  { key: 'zoom', label: 'Content size', type: 'select', group: 'Widget', default: '', choices: () => [['', 'Automatic (fits the widget, or same as the dashboard)'], ...SIZES.map((v) => [String(v), `${v}%`])] },
 ];
 
 function mount(entry, content) {
@@ -110,7 +127,7 @@ function mount(entry, content) {
   content.innerHTML = `<div class="w ${widget?.chrome === false ? 'nochrome' : ''} ${opts.hideTitle ? 'notitle' : ''}">
     <div class="whead"><span class="wtitle">${esc(opts.title || widget?.title || entry.def.type)}</span>
       <span class="wactions"></span>
-      <span class="wedit"><button data-act="smaller" title="Smaller contents">A−</button><span class="wsize"></span><button data-act="bigger" title="Bigger contents">A+</button><button data-act="settings" title="Settings">⚙</button><button data-act="remove" title="Remove">✕</button></span></div>
+      <span class="wedit"><button data-act="smaller" title="Smaller contents">A−</button><button class="wsize" data-act="auto"></button><button data-act="bigger" title="Bigger contents">A+</button><button data-act="settings" title="Settings">⚙</button><button data-act="remove" title="Remove">✕</button></span></div>
     <div class="wframe"><div class="wbody"></div></div></div>`;
   const body = content.querySelector('.wbody');
   entry.content = content;
@@ -152,6 +169,11 @@ gridEl.addEventListener('click', (e) => {
   if (!b) return;
   const id = b.closest('.grid-stack-item').getAttribute('gs-id');
   const entry = live.get(id);
+  if (b.dataset.act === 'auto') {
+    entry.def.options = { ...entry.def.options, zoom: '' };
+    applySize(entry);
+    return;
+  }
   if (b.dataset.act === 'smaller' || b.dataset.act === 'bigger') {
     const next = step(sizeOf(entry.def), b.dataset.act === 'bigger' ? 1 : -1);
     entry.def.options = { ...entry.def.options, zoom: next === (current.scale || 100) ? '' : String(next) };

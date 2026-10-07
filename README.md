@@ -115,7 +115,9 @@ Lobby TV or Campus 2. On phones, widgets stack into a single column.
 | Stream | **Live viewers** (total and per platform, peak, last-hour graph), **Stream comments** (YouTube + Facebook in one feed; questions and prayer requests highlighted; filter to just those), **Pinned comment** (big, for a host or confidence screen) |
 | Team | **Alerts**, **Notes** (shared live), **Checklist** (shared live, with sections and progress), **Text**, **Web page** (stream analytics, Resi, encoder status, Companion…) |
 
-**Sizing what's inside a widget.** In **✎ Edit**, every widget has **A− / A+** buttons that shrink or grow everything inside it (text, photos, meters) from 50% to 200%, while it still fills its box. **Content** at the top sets the size for the whole dashboard, and widgets you've adjusted keep their own size. The same setting is also under each widget's ⚙.
+**Sizing what's inside a widget.** Widgets that show one big thing fit their box: drag the corner and the contents grow or shrink with it. These are the clock, service clock, current item, timers, video countdown, current/next slide, live viewers, pinned comment, text and the service timeline. When small, they switch to a compact look (for example, a tiny timer shows only the time). Lists, feeds and tables (service plan, comments, playlist, RF, mic boards, notes) keep readable text and show more as they get bigger.
+
+In **✎ Edit**, every widget has **A− / A+** to make its contents smaller or bigger (50–200%). Click the size label between them (**Auto** or a %) to go back to automatic. **Content** at the top sets the size for the whole dashboard. Text and Current slide widgets also take a fixed size in px if you prefer.
 
 ### Mic board
 The **Green Room TV** dashboard and `/greenroom` show one column per mic:
