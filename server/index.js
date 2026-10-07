@@ -15,12 +15,18 @@ import QRCode from 'qrcode';
 import selfsigned from 'selfsigned';
 import { testDevice } from './testers.js';
 import { Tunnel, lanAddresses } from './tunnel.js';
+import { dataDirFor, oldDataCandidates, adoptOldData } from './datadir.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
 // Planning Center) is per organization and edited in the browser. On first run the
 // organization is created from config.yaml, so existing setups carry over.
 const cfg = loadConfig();
-const dataDir = path.resolve(ROOT, process.env.WAVS_DATA || 'data');
+const dataDir = dataDirFor({ root: ROOT });
+if (!process.env.WAVS_DATA) {
+  const from = adoptOldData(dataDir, oldDataCandidates({ root: ROOT }));
+  if (from) console.log(`[data] copied your existing setup from ${from}`);
+}
+console.log(`[data] saved in ${dataDir}`);
 const orgs = new OrgRegistry(dataDir);
 orgs.migrate(cfg);
 
@@ -49,6 +55,7 @@ function publicConfig() {
     orgId: rt.orgId,
     orgs: orgs.list(),
     setupComplete: s.setupComplete,
+    dataDir,
     alerts: s.alerts,
     rf: s.rf,
     video: s.video,

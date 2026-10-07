@@ -98,6 +98,7 @@ document.getElementById('beh-form').onsubmit = (e) => {
 };
 
 // ---------------------------------------------------------------- organizations
+document.getElementById('data-dir').textContent = store.config.dataDir || '';
 const list = document.getElementById('org-list');
 list.innerHTML = cfg.orgs.map((o) => `<div class="org-row ${o.id === cfg.orgId ? 'cur' : ''}">
   <span class="org-dot" style="background:${esc(o.color)}"></span><b>${esc(o.name)}</b>

@@ -261,12 +261,12 @@ With both off, anyone on the network can join and pick a position.
 ### Setting it up
 1. On the dashboard computer, open **`http://localhost:8080/comms/engine`** in Chrome and click **Start**. Leave the tab open; closing it stops comms. Allow the microphone when asked: that lets phones connect directly, and nothing is recorded.
 2. Phones join by scanning the QR code on the Comms page. There are two kinds of link:
-   - **Same Wi-Fi** (`https://<computer-ip>:8443/comms`): the phone must be on the same network as the dashboard computer. Phones only allow the microphone on `https://` pages, so the dashboard runs a second, encrypted port (**8443**) with its own certificate (stored in `data/tls/`). The first time, each phone warns that the connection isn't private:
+   - **Same Wi-Fi** (`https://<computer-ip>:8443/comms`): the phone must be on the same network as the dashboard computer. Phones only allow the microphone on `https://` pages, so the dashboard runs a second, encrypted port (**8443**) with its own certificate (stored in the data folder under `tls/`). The first time, each phone warns that the connection isn't private:
      - iPhone: tap **Show Details → visit this website**.
      - Android: tap **Advanced → Proceed**.
 
      Change the port with `HTTPS_PORT=...` (`HTTPS_PORT=0` turns it off).
-   - **Anywhere** (turn on **Off-site access** on the Comms page): a secure link like `https://<random>.trycloudflare.com/comms` that works on any network (Wi-Fi, a personal hotspot, cellular) with no certificate warning. It uses a free Cloudflare quick tunnel and needs no account. The first time, the dashboard downloads Cloudflare's `cloudflared` program into `data/bin/`; if you already installed it with Homebrew, that copy is used. The link changes each time the dashboard restarts, and the QR code updates with it. Only the comms phone page is reachable through this link: the dashboard, settings and the comms control page are not. Set a **team password** or **Only people on the list** when using it.
+   - **Anywhere** (turn on **Off-site access** on the Comms page): a secure link like `https://<random>.trycloudflare.com/comms` that works on any network (Wi-Fi, a personal hotspot, cellular) with no certificate warning. It uses a free Cloudflare quick tunnel and needs no account. The first time, the dashboard downloads Cloudflare's `cloudflared` program into the data folder (`bin/`); if you already installed it with Homebrew, that copy is used. The link changes each time the dashboard restarts, and the QR code updates with it. Only the comms phone page is reachable through this link: the dashboard, settings and the comms control page are not. Set a **team password** or **Only people on the list** when using it.
 3. Use headphones. Each phone keeps its screen awake while comms is open.
 
 **How the audio travels.** A phone first tries to connect its audio directly to the comms engine, which is quickest. If that doesn't work within a few seconds (a hotspot, cellular, or guest Wi-Fi that keeps devices apart), it automatically sends its audio through the dashboard instead. The phone then shows **Connected · via internet**, and the Comms page shows *audio via internet*. That uses about 128 kbit/s each way, and only while someone is talking.
@@ -315,16 +315,27 @@ You can change the thresholds under `alerts:` in the config.
  Shure RX ──TCP 2202──┼─► Node server ──WS────┼── /greenroom
  Planning Center ─────┤   (hub, alerts,       ├── /rf
  (simulators) ────────┘    service tracker)   └── /admin  (setup)
-                          data/*.json  (people, plan progress, notes, dashboards)
+                          data folder (orgs, people, plans, dashboards, comms)
  Capture card / MediaMTX ──────────────────► browser <video>
 ```
 
 - `server/`: Express and WebSocket. All live state sits in one hub. Meters are batched and sent
   10 times per second.
 - `public/`: plain HTML, CSS and JS modules with no build step.
-- `data/`: everything you create, as plain JSON. `data/orgs.json` lists the organizations, and each
-  one has a folder `data/orgs/<id>/` with its settings (gear, PIN, Planning Center), people and
-  photos, dashboards, notes and plan progress. Back this folder up.
+- **Your data** (everything you create, as plain JSON) is kept outside the code folder, so updating,
+  re-downloading or re-cloning the dashboard never loses it:
+  - macOS: `~/Library/Application Support/WAVS Dashboard`
+  - Windows: `%APPDATA%\WAVS Dashboard`
+  - Linux: `~/.wavs-dashboard`
+
+  `orgs.json` lists the organizations, and each one has a folder `orgs/<id>/` with its settings
+  (gear, PIN, Planning Center), people and photos, dashboards, notes, plan progress and comms.
+  Settings → Organizations shows the exact location. Back this folder up, or copy it to move to
+  another computer. Set `WAVS_DATA=<folder>` to use a different folder.
+
+  Older versions kept this in the code folder's `data/`. On first start, the dashboard copies the
+  most recently used setup from there, or from another copy named `WAVS-Dashboard…` in your
+  home folder, Downloads, Desktop or Documents. The old folder is left untouched.
 - `config/config.yaml` is optional and only holds the server port. When this version first
   starts, the gear and branding from an existing `config.yaml` are imported into the first
   organization, along with existing people and dashboards.
