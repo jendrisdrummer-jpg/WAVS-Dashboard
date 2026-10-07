@@ -23,7 +23,9 @@ export class ServiceManager extends EventEmitter {
     this.file = path.join(dataDir, 'service.json');
     this.pco = pco;
     this.cfg = { followProPresenter: true, livePollMs: 3000, planRefreshMs: 60000, ...cfg };
-    this.saved = { source: null, serviceTypeId: null, planId: null, manual: null, current: null, actuals: {} };
+    // links: per plan, which plan item each ProPresenter playlist item is ({ ppKey: itemId | 'ignore' }).
+    // aliases: remembered by name for future plans ({ "pp name": "plan item title" | 'ignore' }).
+    this.saved = { source: null, serviceTypeId: null, planId: null, manual: null, current: null, actuals: {}, links: {}, aliases: {} };
     if (fs.existsSync(this.file)) {
       try { this.saved = { ...this.saved, ...JSON.parse(fs.readFileSync(this.file, 'utf8')) }; } catch { /* start fresh */ }
     }
@@ -71,7 +73,76 @@ export class ServiceManager extends EventEmitter {
       upcoming: this.upcoming,
       pco: this.pcoStatus,
       followProPresenter: this.cfg.followProPresenter,
+      links: this.saved.links?.[this.planKey()] || {},
+      remembered: Object.keys(this.saved.aliases || {}).length,
     };
+  }
+
+  /** Links belong to one plan (Planning Center plans are new every week). */
+  planKey() { return `${this.saved.source}:${this.saved.planId || 'manual'}`; }
+
+  /**
+   * Which plan item a ProPresenter playlist item is, and how we know:
+   *   link        set on the Service page for this plan
+   *   remembered  linked by name in an earlier plan ("Countdown Loop" is always "Pre-Service")
+   *   name        same (or contained) name
+   *   position    nth item of the playlist = nth item of the plan (same number of items)
+   *   ignore      set to "don't move the plan"
+   */
+  resolve(cued, pl) {
+    if (!this.plan || !cued || cued.type === 'header') return { itemId: null, how: null };
+    const items = this.plan.items.filter((i) => i.type !== 'header');
+    const link = (this.saved.links?.[this.planKey()] || {})[ppKey(cued)];
+    if (link === 'ignore') return { itemId: null, how: 'ignore' };
+    if (link && items.some((i) => i.id === link)) return { itemId: link, how: 'link' };
+    const alias = (this.saved.aliases || {})[normalize(cued.name)];
+    if (alias === 'ignore') return { itemId: null, how: 'ignore' };
+    if (alias) {
+      const hit = this.byTitle(alias, (t) => t === alias);
+      if (hit) return { itemId: hit.id, how: 'remembered' };
+    }
+    const want = normalize(cued.name);
+    const named = want && this.byTitle(want, (t) => t === want || (t.length > 3 && want.includes(t)) || (want.length > 3 && t.includes(want)));
+    if (named) return { itemId: named.id, how: 'name' };
+    const plItems = (pl?.items || []).filter((i) => i.type !== 'header');
+    const k = plItems.indexOf(cued);
+    if (k >= 0 && plItems.length === items.length) return { itemId: items[k].id, how: 'position' };
+    return { itemId: null, how: null };
+  }
+
+  /** First plan item whose title passes `test`, preferring ones at or after the current item (songs repeat). */
+  byTitle(_want, test) {
+    const idx = this.plan.items.findIndex((i) => i.id === this.saved.current?.itemId);
+    const matches = this.plan.items.filter((i) => i.type !== 'header' && normalize(i.title) && test(normalize(i.title)));
+    return matches.find((m) => this.plan.items.indexOf(m) >= idx) || matches[0] || null;
+  }
+
+  /** How every item of a ProPresenter playlist matches the plan (for the Service page). */
+  preview(pl) {
+    return (pl?.items || []).map((it, i) => ({
+      key: ppKey(it), name: it.name, type: it.type, cued: i === pl.index,
+      link: (this.saved.links?.[this.planKey()] || {})[ppKey(it)] || null,
+      ...this.resolve(it, pl),
+    }));
+  }
+
+  /** Link a ProPresenter item to a plan item (or 'ignore', or null for automatic). Also remembered by name. */
+  setLink({ key, name, itemId }) {
+    if (!this.plan) throw new Error('Load a service plan first');
+    if (itemId && itemId !== 'ignore' && !this.plan.items.some((i) => i.id === itemId)) throw new Error('Unknown plan item');
+    const pk = this.planKey();
+    const links = { ...(this.saved.links?.[pk] || {}) };
+    const aliases = { ...(this.saved.aliases || {}) };
+    const n = normalize(name);
+    if (!itemId) { delete links[key]; if (n) delete aliases[n]; } else {
+      links[key] = itemId;
+      if (n) aliases[n] = itemId === 'ignore' ? 'ignore' : normalize(this.plan.items.find((i) => i.id === itemId).title);
+    }
+    // Keep links for the last few plans only.
+    const all = { ...(this.saved.links || {}), [pk]: links };
+    this.saved = { ...this.saved, links: Object.fromEntries(Object.entries(all).slice(-12)), aliases };
+    this.save();
+    this.emitState();
   }
 
   /** A manual plan is "today's" plan: its start time is applied to the current date. */
@@ -154,6 +225,12 @@ export class ServiceManager extends EventEmitter {
   /** Called when ProPresenter's active presentation changes. */
   onPresentation(name) {
     if (!this.cfg.followProPresenter || !this.plan || !name) return false;
+    const alias = (this.saved.aliases || {})[normalize(name)];
+    if (alias === 'ignore') return true;
+    if (alias) {
+      const hit = this.byTitle(alias, (t) => t === alias);
+      if (hit) { if (hit.id !== this.saved.current?.itemId) this.setCurrent(hit.id, 'propresenter'); return true; }
+    }
     const items = this.plan.items.filter((i) => i.type !== 'header');
     const want = normalize(name);
     if (!want) return false;
@@ -195,12 +272,8 @@ export class ServiceManager extends EventEmitter {
     }
     const cued = pl.items[pl.index];
     if (!this.plan || !cued) return;
-    if (this.onPresentation(cued.name)) return;
-    const planItems = this.plan.items.filter((i) => i.type !== 'header');
-    const plItems = pl.items.filter((i) => i.type !== 'header');
-    if (planItems.length !== plItems.length) return;
-    const k = plItems.indexOf(cued);
-    if (k >= 0 && planItems[k].id !== this.saved.current?.itemId) this.setCurrent(planItems[k].id, 'propresenter');
+    const { itemId } = this.resolve(cued, pl);
+    if (itemId && itemId !== this.saved.current?.itemId) this.setCurrent(itemId, 'propresenter');
   }
 
   /** Use ProPresenter's active playlist as the order of service. */
@@ -239,6 +312,9 @@ export class ServiceManager extends EventEmitter {
     this.emitState();
   }
 }
+
+/** A stable key for a ProPresenter playlist item (its presentation id, or its name). */
+export const ppKey = (it) => (it?.uuid ? `u:${it.uuid}` : `n:${normalize(it?.name)}`);
 
 export function normalize(s) {
   return String(s || '').toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();

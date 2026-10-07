@@ -176,6 +176,16 @@ No Planning Center? On **Service & People**, press **Use the ProPresenter playli
 that's active in ProPresenter becomes the order of service, headers included, and it advances as
 the operator cues each item.
 
+
+### Matching ProPresenter's playlist to your plan
+When the operator cues an item in ProPresenter's active playlist, the plan (and the **Service timeline** widget) moves to the matching plan item:
+1. **Your links** come first. Set them on **Service & People → Match with ProPresenter**, which lists every playlist item with a dropdown: **Auto**, a plan item, or **Don't move the plan** (for an announcement loop, say).
+2. **Remembered links** come next. Links are remembered by name, so next week's plan matches without redoing them. For example, "Countdown Loop" is always "Pre-Service".
+3. Then **the same name**, or one name containing the other.
+4. Finally **by position**, when the playlist and the plan have the same number of items.
+
+The panel shows how each item is matched right now, so you can fix anything before the service starts.
+
 ### Which item is "current"
 Whichever of these happens most recently moves the plan along:
 - **ProPresenter playlist**: when the operator cues the next item in the active playlist, the plan
