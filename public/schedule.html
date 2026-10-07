@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Schedule</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <main class="page">
+    <div class="page-head">
+      <div><h1>Schedule</h1><p class="muted">Plan services ahead: a conference's sessions, next month's Sundays, or a service that repeats every week. Each one has its own order of service and mic plan.</p></div>
+      <div class="sch-actions">
+        <button class="btn primary" id="add-service">+ Service</button>
+        <button class="btn" id="add-event">+ Event</button>
+        <button class="btn" id="add-repeat">↻ Repeating service</button>
+      </div>
+    </div>
+    <section class="panel"><div class="panel-body sch-top" id="top"></div></section>
+    <section class="panel" id="repeat-panel"><h2>Repeating services</h2><div class="panel-body" id="repeats"></div></section>
+    <section class="panel"><h2>Services</h2><div class="panel-body" id="list"></div></section>
+  </main>
+  <script type="module" src="/js/schedule.js"></script>
+</body>
+</html>

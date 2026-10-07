@@ -114,7 +114,7 @@ body.kiosk .topbar { display: none; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.danger { color: var(--critical); }
 .btn.small { padding: 3px 8px; font-size: 12px; }
-input[type=text], input[type=search], input[type=password], input[type=time], input[type=number], select, textarea {
+input[type=text], input[type=search], input[type=password], input[type=time], input[type=date], input[type=number], select, textarea {
   background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; min-width: 0;
 }
 input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1013,3 +1013,48 @@ body.as-lead .lead-only-hide { display: none !important; }
 }
 .face-status { color: var(--text-2); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .face-status .bad-text { color: var(--critical); }
+
+/* Schedule (services planned ahead) */
+.sch-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.sch-top { display: grid; gap: 12px; }
+.sch-now { display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: center; }
+.sch-now > div { display: grid; gap: 2px; min-width: 0; }
+.sch-now b { font-size: 18px; }
+.sch-now > .btn { justify-self: start; }
+.sch-auto { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.sch-day { margin: 14px 0 6px; font-weight: 800; color: var(--text-2); text-transform: uppercase; font-size: 12px; letter-spacing: .04em; }
+.sch-day:first-child { margin-top: 0; }
+.sch-row { display: grid; grid-template-columns: 90px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 6px; background: var(--panel-2); }
+.sch-row.live { border-color: var(--live); box-shadow: inset 4px 0 0 var(--live); }
+.sch-row.done { opacity: .6; }
+.sch-when { display: grid; gap: 4px; justify-items: start; }
+.sch-what { display: grid; gap: 3px; min-width: 0; }
+.sch-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.sch-chg summary { cursor: pointer; font-size: 12px; color: var(--text-2); }
+.sch-events { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.sch-event { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 10px; }
+.sch-dlg { width: min(760px, calc(100vw - 32px)); }
+.sch-dlg fieldset { display: grid; gap: 8px; padding: 10px; }
+.sch-dlg textarea { font-family: var(--mono); font-size: 12px; }
+.sch-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.sch-mics { display: grid; gap: 6px; }
+.sch-mic { display: grid !important; grid-template-columns: 110px minmax(0, 1fr) minmax(0, 1fr); gap: 6px; align-items: center; }
+.sch-mic span { font-weight: 700; color: var(--text); }
+.sch-dlg-btns { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.chgs { display: grid; gap: 3px; margin-top: 4px; }
+.chg { display: grid; grid-template-columns: minmax(70px, auto) 1fr auto 1fr; gap: 6px; font-size: 13px; align-items: baseline; }
+.chg .arrow { color: var(--muted); }
+.home-sched .sched-card { display: grid; grid-template-columns: 1fr 1fr 1.3fr auto; gap: 18px; align-items: start; }
+.sched-col { display: grid; gap: 3px; min-width: 0; }
+.sched-col b { font-size: 18px; }
+.sched-btns { display: grid; gap: 8px; justify-items: end; }
+.sched-warn { color: var(--warning); font-size: 13px; font-weight: 600; }
+.sched-empty { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--text-2); }
+@media (max-width: 800px) {
+  .sch-now, .home-sched .sched-card { grid-template-columns: 1fr; }
+  .sched-btns { justify-items: start; grid-auto-flow: column; justify-content: start; }
+  .sch-row { grid-template-columns: 70px minmax(0, 1fr); }
+  .sch-btns { grid-column: 1 / -1; justify-content: flex-start; }
+  .sch-mic { grid-template-columns: 1fr 1fr; }
+  .sch-mic span { grid-column: 1 / -1; }
+}

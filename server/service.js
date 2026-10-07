@@ -25,7 +25,8 @@ export class ServiceManager extends EventEmitter {
     this.cfg = { followProPresenter: true, livePollMs: 3000, planRefreshMs: 60000, ...cfg };
     // links: per plan, which plan item each ProPresenter playlist item is ({ ppKey: itemId | 'ignore' }).
     // aliases: remembered by name for future plans ({ "pp name": "plan item title" | 'ignore' }).
-    this.saved = { source: null, serviceTypeId: null, planId: null, manual: null, current: null, actuals: {}, links: {}, aliases: {} };
+    // expectPlaylist: the ProPresenter playlist this service uses (from the schedule); others are ignored.
+    this.saved = { source: null, serviceTypeId: null, planId: null, manual: null, current: null, actuals: {}, links: {}, aliases: {}, expectPlaylist: '' };
     if (fs.existsSync(this.file)) {
       try { this.saved = { ...this.saved, ...JSON.parse(fs.readFileSync(this.file, 'utf8')) }; } catch { /* start fresh */ }
     }
@@ -75,7 +76,24 @@ export class ServiceManager extends EventEmitter {
       followProPresenter: this.cfg.followProPresenter,
       links: this.saved.links?.[this.planKey()] || {},
       remembered: Object.keys(this.saved.aliases || {}).length,
+      playlist: { expected: this.saved.expectPlaylist || '', active: this.activePlaylist || null },
     };
+  }
+
+  /** Only follow this ProPresenter playlist ('' = whichever is active). */
+  expectPlaylist(name) {
+    const v = String(name || '').trim();
+    if (v === (this.saved.expectPlaylist || '')) return;
+    this.saved = { ...this.saved, expectPlaylist: v };
+    this.save();
+    this.emitState();
+  }
+
+  /** Is this the playlist the service expects? (Remembers the active one for the warning.) */
+  playlistOk(pl) {
+    if (this.activePlaylist !== pl.name) { this.activePlaylist = pl.name; this.emitState(); }
+    const want = normalize(this.saved.expectPlaylist);
+    return !want || normalize(pl.name) === want;
   }
 
   /** Links belong to one plan (Planning Center plans are new every week). */
@@ -149,7 +167,7 @@ export class ServiceManager extends EventEmitter {
   planForToday() {
     if (this.saved.source !== 'manual' || !this.plan) return this.plan;
     const m = String(this.plan.start || '').match(/^(\d{1,2}):(\d{2})$/);
-    const d = new Date();
+    const d = this.plan.date ? new Date(`${this.plan.date}T00:00`) : new Date();
     const dates = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
     if (!m) return { ...this.plan, dates };
     d.setHours(Number(m[1]), Number(m[2]), 0, 0);
@@ -192,16 +210,17 @@ export class ServiceManager extends EventEmitter {
   }
 
   /** Manual plan from lines like "5:00 Welcome", "# Worship" (header), "Song: 4:30 Holy Forever". */
-  setManual({ title, text, start }) {
+  setManual({ title, text, start, date = '' }) {
     const items = parsePlanText(text);
-    // Optional service start time ("09:30"); applied to today's date in state().
+    // Optional service start time ("09:30"); applied to today's date in state(), or to date
+    // ("2026-05-02") for a scheduled service.
     const m = String(start || '').match(/^(\d{1,2}):(\d{2})$/);
     this.saved = {
       ...this.saved,
       source: 'manual',
       serviceTypeId: null,
       planId: null,
-      manual: { title: title || 'Service', seriesTitle: null, dates: null, times: [], items, text, start: m ? start : '' },
+      manual: { title: title || 'Service', seriesTitle: null, dates: null, times: [], items, text, start: m ? start : '', date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '' },
       current: null,
       actuals: {},
     };
@@ -254,6 +273,7 @@ export class ServiceManager extends EventEmitter {
    */
   onPlaylist(pl) {
     if (!this.cfg.followProPresenter || !pl?.items?.length) return;
+    if (!this.playlistOk(pl)) return; // another service's playlist is open in ProPresenter
     if (this.saved.source === 'propresenter') {
       const items = pl.items.map((it, i) => ({
         id: `${pl.uuid}:${i}`,

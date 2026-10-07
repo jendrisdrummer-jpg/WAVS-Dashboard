@@ -403,6 +403,8 @@ app.post('/api/mics/:micId/push-name', need('producer'), wrap((req, res) => {
 app.get('/api/service', (_req, res) => res.json(rt.service.state()));
 app.post('/api/service/pco', need('producer'), wrap(async (req, res) => {
   await rt.service.selectPco(String(req.body?.serviceTypeId), String(req.body?.planId));
+  const picked = rt.service.upcoming.find((u) => u.id === String(req.body?.planId));
+  livePlan({ source: 'pco', serviceTypeId: String(req.body?.serviceTypeId), planId: String(req.body?.planId), pcoTitle: picked?.title || '' });
   res.json(rt.service.state());
 }));
 app.post('/api/service/pco/refresh', need('producer'), wrap(async (_req, res) => {
@@ -410,8 +412,11 @@ app.post('/api/service/pco/refresh', need('producer'), wrap(async (_req, res) =>
   await rt.service.reloadPco();
   res.json(rt.service.state());
 }));
+// Changing the plan while a scheduled service is live also changes that service.
+const livePlan = (fields) => rt.schedule.syncLive({ plan: { ...(rt.schedule.live()?.plan || {}), ...fields } });
 app.put('/api/service/manual', need('producer'), wrap((req, res) => {
   rt.service.setManual({ title: String(req.body?.title || ''), text: String(req.body?.text || ''), start: String(req.body?.start || '') });
+  livePlan({ source: 'manual', text: String(req.body?.text || '') });
   res.json(rt.service.state());
 }));
 // Matching ProPresenter's playlist to the plan: what each item matches now, and setting links.
@@ -427,7 +432,32 @@ app.put('/api/service/links', need('producer'), wrap((req, res) => {
   if (pp && rt.service.saved.source !== 'propresenter') rt.service.onPlaylist(pp.playlist);
   res.json({ ok: true });
 }));
-app.post('/api/service/propresenter', need('producer'), wrap((_req, res) => { rt.service.useProPresenter(); res.json(rt.service.state()); }));
+app.post('/api/service/propresenter', need('producer'), wrap((_req, res) => { rt.service.useProPresenter(); livePlan({ source: 'propresenter' }); res.json(rt.service.state()); }));
+
+// ---- schedule: services planned ahead (events, recurring), which one is live
+app.get('/api/schedule', (_req, res) => res.json(rt.schedule.view()));
+app.post('/api/schedule/services', need('producer'), wrap((req, res) => res.json(rt.schedule.addService(req.body || {}))));
+app.put('/api/schedule/services/:id', need('producer'), wrap((req, res) => {
+  const planBefore = JSON.stringify(rt.schedule.get(req.params.id)?.plan);
+  const s = rt.schedule.updateService(req.params.id, req.body || {});
+  // Editing the live service: load the changes (hand-off statuses are kept; the plan only if it changed).
+  if (rt.schedule.data.liveId === s.id) rt.goLive(s.id, 'edit', { reloadPlan: JSON.stringify(s.plan) !== planBefore });
+  res.json(s);
+}));
+app.delete('/api/schedule/services/:id', need('producer'), wrap((req, res) => { rt.schedule.removeService(req.params.id); res.json({ ok: true }); }));
+app.post('/api/schedule/services/:id/duplicate', need('producer'), wrap((req, res) => res.json(rt.schedule.duplicate(req.params.id, req.body || {}))));
+app.post('/api/schedule/services/:id/live', need('producer'), wrap((req, res) => res.json(rt.goLive(req.params.id))));
+app.post('/api/schedule/next', need('producer'), wrap((_req, res) => {
+  const next = rt.schedule.next();
+  if (!next) throw new Error('Nothing else is scheduled. Add services on the Schedule page.');
+  res.json(rt.goLive(next.id));
+}));
+app.put('/api/schedule/options', need('producer'), wrap((req, res) => { rt.schedule.setOptions(req.body || {}); rt.checkSchedule(); res.json(rt.schedule.view()); }));
+app.post('/api/schedule/events', need('producer'), wrap((req, res) => res.json(rt.schedule.addEvent(req.body || {}))));
+app.put('/api/schedule/events/:id', need('producer'), wrap((req, res) => res.json(rt.schedule.updateEvent(req.params.id, req.body || {}))));
+app.delete('/api/schedule/events/:id', need('producer'), wrap((req, res) => { rt.schedule.removeEvent(req.params.id, { withServices: req.query.services === '1' }); res.json({ ok: true }); }));
+app.post('/api/schedule/templates', need('producer'), wrap((req, res) => res.json(rt.schedule.saveTemplate(req.body || {}))));
+app.delete('/api/schedule/templates/:id', need('producer'), wrap((req, res) => { rt.schedule.removeTemplate(req.params.id); res.json({ ok: true }); }));
 // Moving through the plan is allowed without the PIN so any operator can follow along.
 app.post('/api/service/current', need('open'), wrap((req, res) => { rt.service.setCurrent(req.body?.itemId || null, 'manual'); res.json({ ok: true }); }));
 app.post('/api/service/next', need('open'), wrap((_req, res) => { rt.service.step(1); res.json({ ok: true }); }));
@@ -504,7 +534,7 @@ app.get('/api/comms/qr.svg', wrap(async (req, res) => {
 const pub = path.join(ROOT, 'public');
 const pages = {
   '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html', '/tv/:org/:dash': 'dashboard.html',
-  '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/gear': 'gear.html', '/settings': 'settings.html',
+  '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/schedule': 'schedule.html', '/gear': 'gear.html', '/settings': 'settings.html',
   '/comms': 'comms.html', '/comms/control': 'comms-control.html', '/comms/engine': 'comms-engine.html',
   '/login': 'login.html', '/join/:code': 'login.html',
 };

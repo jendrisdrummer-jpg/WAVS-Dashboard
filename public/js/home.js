@@ -1,6 +1,7 @@
 // Home: what's happening now, where to go, and whether the gear is healthy.
-import { start, store, onRender, esc, setHTML, icon, fmtDuration, can } from './common.js';
+import { start, store, onRender, esc, setHTML, icon, fmtDuration, can, api, toast } from './common.js';
 import { currentInfo, serviceClock, planSource } from './plan.js';
+import { fmtWhen, fmtIn, micChanges, changesHtml } from './schedulekit.js';
 
 await start({ page: 'home' });
 
@@ -9,6 +10,7 @@ const cfg = store.config;
 setHTML(document.getElementById('links'), [
   ['/greenroom', 'mic', 'Green Room', 'Who has which mic'],
   ['/rf', 'rf', 'RF & batteries', 'Every channel and frequency'],
+  ['/schedule', 'calendar', 'Schedule', 'Services planned ahead', 'producer'],
   ['/admin', 'list', 'Service & people', 'Plan, people, mic assignments', 'producer'],
   ['/comms/control', 'headset', 'Comms', 'Channels, people, cues', 'producer'],
   ['/gear', 'plug', 'Gear', 'Connections and setup', 'admin'],
@@ -31,7 +33,40 @@ function gearSummary() {
     <a class="btn small" href="/gear">Open Gear</a>`;
 }
 
+/** Live and next scheduled service, with "Next service" and what changes on the mics. */
+function scheduleCard() {
+  const sc = store.schedule;
+  const el = document.getElementById('sched');
+  const live = sc.services.find((s) => s.id === sc.liveId);
+  const next = sc.services.find((s) => s.id === sc.nextId);
+  const pl = store.service.playlist || {};
+  const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const wrongPlaylist = pl.expected && pl.active && norm(pl.expected) !== norm(pl.active);
+  el.classList.toggle('hidden', !live && !next && !(can('producer') && store.config.setupComplete));
+  if (!live && !next) {
+    setHTML(el, `<div class="panel-body sched-empty">${icon('calendar')} <span>Plan services ahead: a conference's sessions or next month's Sundays.</span> <a class="btn small" href="/schedule">Open Schedule</a></div>`);
+    return;
+  }
+  const changes = live && next ? micChanges(live.mics, next.mics) : [];
+  setHTML(el, `<div class="panel-body sched-card">
+    <div class="sched-col"><small class="muted">Live now</small><b>${live ? esc(live.name) : '—'}</b><span class="muted">${live ? fmtWhen(live.start) : 'No scheduled service is live'}</span>
+      ${wrongPlaylist ? `<span class="sched-warn">⚠ ProPresenter has “${esc(pl.active)}” open; this service uses “${esc(pl.expected)}”.</span>` : ''}</div>
+    <div class="sched-col"><small class="muted">Up next</small><b>${next ? esc(next.name) : '—'}</b>
+      <span class="muted">${next ? `${fmtWhen(next.start)}${sc.auto && sc.switchAt ? ` · goes live by itself ${fmtIn(sc.switchAt)}` : ''}` : 'Nothing else scheduled'}</span></div>
+    ${live && next ? `<div class="sched-col sched-chg"><small class="muted">Mic changes for ${esc(next.name)}</small>${changesHtml(changes, { max: 6 })}</div>` : ''}
+    <div class="sched-btns">${next && can('producer') ? '<button class="btn primary" data-next>Next service ▶</button>' : ''}<a class="btn small" href="/schedule">Schedule</a></div>
+  </div>`);
+}
+
+document.getElementById('sched').addEventListener('click', async (e) => {
+  if (!e.target.closest('[data-next]')) return;
+  const next = store.schedule.services.find((s) => s.id === store.schedule.nextId);
+  if (!next || !confirm(`Go to “${next.name}” now? Its mic plan and order of service are loaded, and everyone's mic goes back to “Assigned”.`)) return;
+  try { await api('POST', '/api/schedule/next'); toast(`${next.name} is live`); } catch (err) { toast(err.message, true); }
+});
+
 function render() {
+  scheduleCard();
   const svc = store.service;
   const info = currentInfo(svc);
   const clock = serviceClock(svc);
