@@ -37,8 +37,34 @@ export class Tunnel extends EventEmitter {
     this.port = port;
     this.state = { status: 'off', url: null, error: null };
     this.enabled = false;
-    try { this.enabled = JSON.parse(fs.readFileSync(this.file, 'utf8')).enabled === true; } catch { /* first run */ }
+    // mode "quick": a free random https://….trycloudflare.com address that changes on each start.
+    // mode "named": your own address (e.g. dashboard.yourchurch.org) from a Cloudflare tunnel token.
+    this.conf = { mode: 'quick', token: '', hostname: '' };
+    try {
+      const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      this.enabled = saved.enabled === true;
+      this.conf = { mode: saved.mode || 'quick', token: saved.token || '', hostname: saved.hostname || '' };
+    } catch { /* first run */ }
   }
+
+  persist() {
+    fs.writeFileSync(this.file, JSON.stringify({ ...this.conf, enabled: this.enabled }, null, 2), { mode: 0o600 });
+  }
+
+  /** What the browser may see (never the token). */
+  publicState() {
+    return { ...this.state, enabled: this.enabled, mode: this.conf.mode, hostname: this.conf.hostname || null, hasToken: Boolean(this.conf.token), port: this.port };
+  }
+
+  configure({ mode, token, hostname }) {
+    if (mode) this.conf.mode = mode === 'named' ? 'named' : 'quick';
+    if (typeof token === 'string' && token.trim() && !/^•+$/.test(token)) this.conf.token = token.trim();
+    if (typeof hostname === 'string') this.conf.hostname = hostname.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase();
+    if (this.conf.mode === 'named' && (!this.conf.token || !this.conf.hostname)) throw new Error('Enter the tunnel token and the address (e.g. dashboard.yourchurch.org)');
+    this.persist();
+  }
+
+  restart() { this.stop(); this.start(); }
 
   set(patch) {
     this.state = { ...this.state, ...patch };
@@ -48,7 +74,7 @@ export class Tunnel extends EventEmitter {
   /** Turn off-site access on or off (remembered across restarts). */
   async enable(on) {
     this.enabled = Boolean(on);
-    fs.writeFileSync(this.file, JSON.stringify({ enabled: this.enabled }));
+    this.persist();
     if (this.enabled) return this.start();
     this.stop();
     this.set({ status: 'off', url: null, error: null });
@@ -93,13 +119,21 @@ export class Tunnel extends EventEmitter {
       const bin = (await this.findBinary()) || (await this.install());
       if (!this.enabled) return;
       this.set({ status: 'starting', url: null, error: null });
-      const proc = spawn(bin, ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${this.port}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const named = this.conf.mode === 'named' && this.conf.token;
+      const args = named
+        ? ['tunnel', '--no-autoupdate', 'run', '--token', this.conf.token]
+        : ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${this.port}`];
+      const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       this.proc = proc;
       let log = '';
       const onData = (chunk) => {
         const text = chunk.toString();
         log = (log + text).slice(-2000);
-        const m = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+        if (named && /Registered tunnel connection/i.test(text) && this.state.status !== 'on') {
+          this.set({ status: 'on', url: `https://${this.conf.hostname}`, error: null });
+          console.log(`  Off-site: https://${this.conf.hostname}`);
+        }
+        const m = !named && text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
         if (m && this.state.url !== m[0]) {
           this.set({ status: 'on', url: m[0], error: null });
           console.log(`  Comms off-site: ${m[0]}/comms`);
@@ -123,7 +157,8 @@ export class Tunnel extends EventEmitter {
 
   stop() {
     clearTimeout(this.retry);
-    if (this.proc) { this.proc.kill(); this.proc = null; }
+    if (this.proc) { const p = this.proc; this.proc = null; p.removeAllListeners('exit'); p.kill(); }
+    this.set({ url: null, status: this.enabled ? 'starting' : 'off' });
   }
 }
 

@@ -164,7 +164,7 @@ async function drawAccounts() {
     ${d.invites.length ? `<div class="acct-invites">${d.invites.map((i) => `<div class="acct-row">
         <span class="chip">${ROLE_LABEL[i.role]}</span><span>${esc(i.label || 'Invite link')}</span>
         <small class="muted">used ${i.used}× · expires ${new Date(i.expires).toLocaleDateString()}</small>
-        <button class="btn small" data-copy="${esc(i.url)}">Copy link</button><button class="btn small" data-show="${esc(i.code)}">QR</button>
+        <button class="btn small" data-copy="${esc(i.anywhereUrl || i.url)}">Copy link</button><button class="btn small" data-show="${esc(i.code)}">QR</button>
         <button class="btn small danger" data-revoke="${esc(i.code)}">Cancel</button></div>`).join('')}</div>` : ''}
 
     <h3 class="sub-h">Accounts</h3>
@@ -179,11 +179,16 @@ async function drawAccounts() {
   acct._invites = d.invites;
 }
 
+// The "anywhere" link (through the off-site connection) works on mobile data too, so it's the one to share.
 const inviteBox = (i) => `<div class="acct-newinvite">
-    <img class="cc-qr" src="/api/comms/qr.svg?url=${encodeURIComponent(i.url)}" alt="QR code for the invite link">
+    <img class="cc-qr" src="/api/comms/qr.svg?url=${encodeURIComponent(i.anywhereUrl || i.url)}" alt="QR code for the invite link">
     <div><b>${ROLE_LABEL[i.role]} invite${i.label ? ` · ${esc(i.label)}` : ''}</b>
-      <a class="mono cc-url" href="${esc(i.url)}" target="_blank">${esc(i.url)}</a>
-      <div class="row-btns"><button class="btn small" data-copy="${esc(i.url)}">Copy link</button></div>
+      ${i.anywhereUrl ? `<small class="ok">Works anywhere (Wi-Fi or mobile data)</small>
+        <a class="mono cc-url" href="${esc(i.anywhereUrl)}" target="_blank">${esc(i.anywhereUrl)}</a>
+        <small class="muted">Same Wi-Fi only: <span class="mono">${esc(i.url)}</span></small>`
+        : `<a class="mono cc-url" href="${esc(i.url)}" target="_blank">${esc(i.url)}</a>
+        <small class="warn-text">Only works on the same Wi-Fi as this computer. For phones on mobile data, turn on <b>Use from anywhere</b> under This computer below.</small>`}
+      <div class="row-btns"><button class="btn small" data-copy="${esc(i.anywhereUrl || i.url)}">Copy link</button></div>
       <small class="muted">Send it by text or email, or let people scan it. Anyone with the link can create an account until it expires, so share it only with your team.</small></div></div>`;
 
 acct.addEventListener('change', async (e) => {
@@ -253,6 +258,7 @@ async function drawComputer() {
       <div><small class="muted">Version</small>
         <div>${sys.commit ? `<span class="mono">${esc(sys.commit)}</span> · ${esc(sys.date)}` : esc(sys.version)}</div></div>
     </div>
+    <div class="sys-offsite" id="offsite">${offsiteBlock()}</div>
     <div class="sys-update">
       ${!sys.git ? `<p class="muted small">This copy was downloaded as a ZIP, so it can't update itself. Install it with git (see the README) to get the <b>Update now</b> button.</p>`
         : `<div class="row-btns"><button class="btn" id="check-upd" type="button">Check for updates</button>
@@ -261,6 +267,67 @@ async function drawComputer() {
     </div>
     <p class="muted small">Your setup is saved in <span class="mono">${esc(sys.dataDir)}</span>. Updating never touches it.</p>`;
 }
+
+// ---- use from anywhere (mobile data): the Cloudflare link
+let remote = null;
+let remoteEdit = false;
+async function loadRemote() {
+  try { remote = await api('GET', '/api/remote'); } catch { remote = null; }
+  const el = document.getElementById('offsite');
+  if (el && !remoteEdit) el.innerHTML = offsiteBlock();
+}
+setInterval(() => { if (remote?.enabled && remote.status !== 'on') loadRemote(); }, 3000);
+
+function offsiteBlock() {
+  if (!remote) return '<small class="muted">Loading…</small>';
+  const st = { off: 'Off', installing: 'Setting up (first time only)…', starting: 'Connecting…', on: 'On', error: 'Problem' }[remote.status] || remote.status;
+  const named = remote.mode === 'named';
+  return `<div class="off-head"><b>Use from anywhere</b> <span class="chip ${remote.status === 'on' ? 'good' : remote.status === 'error' ? 'bad' : ''}">${remote.enabled ? esc(st) : 'Off'}</span>
+      <button class="btn small ${remote.enabled ? '' : 'primary'}" type="button" data-off="${remote.enabled ? 'off' : 'on'}">${remote.enabled ? 'Turn off' : 'Turn on'}</button></div>
+    <small class="muted">Phones and computers on <b>any</b> network (mobile data, a hotspot, home Wi-Fi) can open the dashboard and comms through a secure Cloudflare link. Everyone must sign in with their account. Video feeds from this building's network (capture cards, local streams) only show here.</small>
+    ${!remote.accounts ? '<small class="warn-text">Create accounts first (above): off-site, everyone signs in. Until then only the comms page works off-site.</small>' : ''}
+    ${remote.status === 'error' ? `<small class="over">${esc(remote.error || '')}</small>` : ''}
+    ${remote.url ? `<div class="off-link"><img class="cc-qr" src="/api/comms/qr.svg?url=${encodeURIComponent(remote.url)}" alt="QR code for the off-site address">
+        <div><a class="mono cc-url" href="${esc(remote.url)}" target="_blank">${esc(remote.url)}</a>
+        <div class="row-btns"><button class="btn small" type="button" data-copy-off="${esc(remote.url)}">Copy</button></div>
+        ${named ? '' : '<small class="muted">This free address changes whenever this computer restarts. For an address that never changes, use your own below.</small>'}</div></div>` : ''}
+    <details class="off-own" ${named ? 'open' : ''}><summary>${named ? 'Your own address' : 'Use your own address (never changes)'}</summary>
+      <form class="form" id="off-form">
+        <small class="muted">Needs a domain on a free Cloudflare account (e.g. <b>dashboard.yourchurch.org</b>).
+          In Cloudflare: <b>Zero Trust → Networks → Tunnels → Create a tunnel</b> (Cloudflared), copy its <b>token</b>, then add a <b>public hostname</b> pointing to <span class="mono">http://localhost:${esc(String(remote.port || 8090))}</span>.</small>
+        <label class="f"><span>Address</span><input type="text" name="hostname" value="${esc(remote.hostname || '')}" placeholder="dashboard.yourchurch.org"></label>
+        <label class="f"><span>Tunnel token</span><input type="password" name="token" placeholder="${remote.hasToken ? '•••••••• (saved)' : 'eyJh…'}" autocomplete="off"></label>
+        <div class="row-btns"><button class="btn small primary">Use my address</button>${named ? '<button class="btn small" type="button" data-off-quick>Switch back to the free address</button>' : ''}</div>
+      </form></details>`;
+}
+
+comp.addEventListener('focusin', (e) => { if (e.target.closest('#off-form')) remoteEdit = true; });
+comp.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-off],[data-copy-off],[data-off-quick]');
+  if (!t) return;
+  try {
+    if (t.dataset.off) {
+      if (t.dataset.off === 'on' && !confirm('Turn on access from anywhere?\n\nThe dashboard gets a secure web address that works on mobile data. Everyone must sign in with their account.')) return;
+      await api('POST', '/api/comms/remote', { on: t.dataset.off === 'on' });
+    }
+    if (t.dataset.copyOff) { try { await navigator.clipboard.writeText(t.dataset.copyOff); toast('Copied'); } catch { prompt('Copy this address', t.dataset.copyOff); } }
+    if (t.hasAttribute('data-off-quick')) await api('POST', '/api/comms/remote', { mode: 'quick' });
+  } catch (err) { toast(err.message, true); }
+  remoteEdit = false;
+  loadRemote();
+});
+comp.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'off-form') return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const f = e.target.elements;
+  try {
+    await api('POST', '/api/comms/remote', { mode: 'named', hostname: f.hostname.value, token: f.token.value, on: true });
+    toast('Connecting to your address…');
+  } catch (err) { toast(err.message, true); }
+  remoteEdit = false;
+  loadRemote();
+}, true);
 
 function updText() {
   if (!upd) return '';
@@ -310,6 +377,7 @@ comp.addEventListener('click', async (e) => {
   }
 });
 drawComputer();
+loadRemote();
 
 // ---------------------------------------------------------------- move to another computer
 const move = document.getElementById('move-body');

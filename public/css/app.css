@@ -970,3 +970,11 @@ body.as-lead .lead-only-hide { display: none !important; }
 }
 @container w (max-height: 170px) { .vw-list { display: none; } }
 @container w (max-width: 160px) { .vw-total small, .tl-h { display: none; } }
+
+/* Settings → This computer: use from anywhere */
+.sys-offsite { padding: 10px 0; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+.off-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.off-link { display: flex; gap: 12px; align-items: flex-start; }
+.off-link > div { display: grid; gap: 6px; min-width: 0; }
+.off-own summary { cursor: pointer; color: var(--text-2); font-weight: 600; font-size: 13px; }
+.off-own form { margin-top: 8px; }
