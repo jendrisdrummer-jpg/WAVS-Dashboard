@@ -1,7 +1,7 @@
-import { start, store, onRender, onMeters, applyMeters, api, toast } from './common.js';
+import { start, store, onRender, onMeters, applyMeters, api, toast, micView } from './common.js';
 import { greenroomCard } from './views.js';
 import { visibleSlots } from './micstrip.js';
-import { mountMicView } from './micviews.js';
+import { mountMicView, nobodyAssigned } from './micviews.js';
 
 await start({ page: 'greenroom' });
 
@@ -35,12 +35,15 @@ function mountBoard() {
 mountBoard();
 let last = '';
 
+// With nobody assigned (no service live), every mic shows as unassigned ("Out": the ones
+// switched on), still with status, battery and RF.
 function shown() {
   const show = filterSel.value;
+  const idle = nobodyAssigned();
   return visibleSlots().filter((s) => {
     const a = store.greenroom.assignments[s.id];
-    if (show === 'assigned') return a && a.status !== 'returned';
-    if (show === 'out') return a && (a.status === 'picked-up' || a.status === 'on-stage');
+    if (show === 'assigned') return idle || (a && a.status !== 'returned');
+    if (show === 'out') return idle ? micView(s).txOn : a && (a.status === 'picked-up' || a.status === 'on-stage');
     return true;
   });
 }

@@ -218,6 +218,11 @@ service live · Next: …" until the next one goes live. If nothing is live but 
 still loaded (e.g. typed in before using the schedule), Home offers "Clear it". Undo brings back
 what End or Clear removed.
 
+**With nothing live** the gear keeps working as usual: ProPresenter (timers, countdowns, slides),
+switchers, streams and alerts. Mic views that normally show only assigned mics show every mic as
+unassigned (status, battery, RF), "in use" views show the mics that are switched on, and every
+switched-on mic gets the weak-RF warning, so sound checks and rehearsals are covered.
+
 Typed plan times never move the plan on by themselves: the current item changes when ProPresenter
 moves, Planning Center LIVE moves, or someone taps Next or an item. (The demo ProPresenter moves
 to its next playlist item every 45 seconds, so with it in Gear the plan appears to advance.)

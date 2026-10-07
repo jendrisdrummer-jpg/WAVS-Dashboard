@@ -76,16 +76,24 @@ export function colorFor(person, slot) {
   return PALETTE[n % PALETTE.length];
 }
 
-/** Mics to show for a set of options, filtered and sorted. */
+/** Nobody has a mic (no service live, or nobody assigned yet). */
+export const nobodyAssigned = () => !Object.values(store.greenroom.assignments).some((a) => a.personId && a.status !== 'returned');
+
+/**
+ * Mics to show for a set of options, filtered and sorted. With nobody assigned (e.g. no service
+ * live), "assigned" views show every mic as unassigned and "in use" views show the mics that are
+ * switched on, so status, battery and RF are still there for a sound check or rehearsal.
+ */
 export function selectSlots(o) {
   const asg = store.greenroom.assignments;
+  const idle = nobodyAssigned();
   const list = store.slots.filter((s) => {
     if (s.hidden) return false;
     if (o.mics?.length && !o.mics.includes(s.id)) return false;
     if (o.kinds?.length && !o.kinds.includes(s.kind)) return false;
     const a = asg[s.id];
-    if (o.show === 'assigned') return a && a.status !== 'returned';
-    if (o.show === 'in-use') return a && (a.status === 'picked-up' || a.status === 'on-stage');
+    if (o.show === 'assigned') return idle || (a && a.status !== 'returned');
+    if (o.show === 'in-use') return idle ? micView(s).txOn : a && (a.status === 'picked-up' || a.status === 'on-stage');
     return true;
   });
   const person = (s) => store.greenroom.people.find((p) => p.id === asg[s.id]?.personId);
@@ -137,7 +145,7 @@ export function mountMicView(el, options = {}, { getSlots } = {}) {
       for (const id of items.keys()) if (!slots.some((s) => s.id === id)) items.delete(id);
       for (const s of slots) if (!items.has(s.id)) items.set(s.id, skeleton(s));
       el.replaceChildren(...slots.map((s) => items.get(s.id).root));
-      if (!slots.length) el.innerHTML = `<div class="w-empty">${o.show === 'all' ? 'No mics configured' : 'Nobody to show yet. Assign people to mics on the <a href="/admin">Setup</a> page.'}</div>`;
+      if (!slots.length) el.innerHTML = `<div class="w-empty">${o.show === 'all' ? 'No mics configured' : nobodyAssigned() && o.show === 'in-use' ? 'No mics are switched on' : 'Nobody to show yet. Assign people to mics on the <a href="/admin">Setup</a> page.'}</div>`;
       if (o.levels === 'meters') applyMeters(el);
     }
     for (const slot of slots) {

@@ -22,6 +22,9 @@ export function computeAlerts(state, greenroom, mics, cfg) {
     else if (sw.ftb) push('warning', `ftb:${sw.id}`, `${sw.name}: Fade to black is ON`);
   }
 
+  // Nobody has a mic (no service live): any mic that's switched on counts as in use for the
+  // weak-RF warning, so a sound check or rehearsal is still watched.
+  const nobodyAssigned = !Object.values(greenroom.assignments).some((a) => a.personId && a.status !== 'returned');
   for (const meta of mics) {
     const m = state.mics[meta.id];
     if (!m || !m.online) continue;
@@ -37,7 +40,7 @@ export function computeAlerts(state, greenroom, mics, cfg) {
       const detail = m.battMinutes != null ? `${m.battMinutes} min left` : `${m.battBars}/5 bars`;
       push(inUse ? 'serious' : 'warning', `batt:${meta.id}`, `${who}: low battery (${detail})`);
     }
-    if (inUse && m.rfDbm != null && m.rfDbm < t.rfLowDbm) push('warning', `rf:${meta.id}`, `${who}: weak RF (${m.rfDbm} dBm)`);
+    if ((inUse || nobodyAssigned) && m.rfDbm != null && m.rfDbm < t.rfLowDbm) push('warning', `rf:${meta.id}`, `${who}: weak RF (${m.rfDbm} dBm)`);
     if (m.interference) push('serious', `int:${meta.id}`, `${who}: RF interference detected`);
     if (a?.status === 'on-stage' && m.txMuted) push('warning', `mute:${meta.id}`, `${who}: transmitter muted while on stage`);
   }
