@@ -444,6 +444,9 @@ You can change the thresholds under `alerts:` in the config.
 
 ## Architecture
 
+The full list of technologies (server, browser, comms, storage, how it runs) is in [docs/TECH_STACK.md](docs/TECH_STACK.md).
+
+
 ```
  ProPresenter ──HTTP──┐
  ATEM / vMix ─────────┤                       ┌── /d/<dashboard>  widgets (gridstack)
