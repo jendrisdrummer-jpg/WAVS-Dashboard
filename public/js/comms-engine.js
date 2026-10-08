@@ -27,6 +27,14 @@ const levels = {};
 
 $('start').onclick = async () => {
   $('err').textContent = '';
+  // Browsers only allow the microphone and audio processing on secure pages; http://localhost
+  // counts, http://name.local doesn't. (Opened on the dashboard computer it redirects there.)
+  if (!window.isSecureContext || !window.AudioWorkletNode) {
+    $('err').innerHTML = !window.isSecureContext
+      ? `This browser only allows comms audio on <b>this computer's own address</b>. Open <a href="http://localhost:${location.port || 80}/comms/engine">http://localhost${location.port ? `:${location.port}` : ''}/comms/engine</a> on the dashboard computer and click Start there.`
+      : 'This browser can\'t run the comms engine. Use Chrome (or a current Safari / Edge) on the dashboard computer.';
+    return;
+  }
   try {
     ctx = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
     await ctx.resume();
@@ -288,6 +296,8 @@ async function syncPorts() {
         d.split.connect(g, p.deviceChannel - 1);
         addSpeaker(`p:${p.id}`, g);
       } else {
+        // Picking an output device needs AudioContext.setSinkId (Chrome / Edge; not Safari yet).
+        if (!('setSinkId' in AudioContext.prototype)) throw new Error('This browser can\'t send audio to an interface output. Run the comms engine in Chrome.');
         const dev = list.out.find((d) => d.label === p.device) || list.out.find((d) => d.deviceId === p.device);
         if (!dev) throw new Error('Device not found');
         let d = devices.out.get(dev.deviceId);

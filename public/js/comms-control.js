@@ -208,7 +208,7 @@ $('people').addEventListener('click', async (e) => {
   const row = e.target.closest('[data-id]');
   if (!row) return;
   const id = row.dataset.id;
-  const m = state.members.find(async (x) => x.id === id);
+  const m = state.members.find((x) => x.id === id);
   const perm = e.target.closest('[data-perm]');
   if (perm) {
     const cur = m.perms?.[perm.dataset.ch] || {};
@@ -386,3 +386,18 @@ $('positions').addEventListener('change', (e) => {
 });
 
 connect();
+
+// "More" menus float above the page, so the scrolling people table doesn't cut them off.
+document.addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (!d.classList?.contains('cc-more') || !d.open) return;
+  for (const other of document.querySelectorAll('.cc-more[open]')) if (other !== d) other.removeAttribute('open');
+  const menu = d.querySelector('.cc-more-menu');
+  const r = d.querySelector('summary').getBoundingClientRect();
+  menu.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
+  const below = window.innerHeight - r.bottom;
+  if (below < menu.offsetHeight + 12 && r.top > below) { menu.style.top = ''; menu.style.bottom = `${window.innerHeight - r.top + 4}px`; }
+  else { menu.style.bottom = ''; menu.style.top = `${r.bottom + 4}px`; }
+}, true);
+window.addEventListener('scroll', () => { for (const d of document.querySelectorAll('.cc-more[open]')) d.removeAttribute('open'); }, true);
+document.addEventListener('click', (e) => { for (const d of document.querySelectorAll('.cc-more[open]')) if (!d.contains(e.target)) d.removeAttribute('open'); });

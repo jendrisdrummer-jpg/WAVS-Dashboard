@@ -542,6 +542,20 @@ app.get('/api/comms/qr.svg', wrap(async (req, res) => {
 
 // ---- pages & static files
 const pub = path.join(ROOT, 'public');
+// The comms engine needs a "secure" page for the microphone and audio processing; browsers
+// treat http://localhost as secure but not http://name.local or http://192.168…. The engine
+// always runs on this computer, so if it's opened here by another name, use localhost instead.
+const thisComputer = (ip) => {
+  const a = String(ip || '').replace(/^::ffff:/, '');
+  if (a === '127.0.0.1' || a === '::1') return true;
+  return Object.values(os.networkInterfaces()).flat().some((i) => i && i.address === a);
+};
+app.get('/comms/engine', (req, res, next) => {
+  if (req.viaTunnel || req.secure || /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(req.get('host') || '')) return next();
+  if (!thisComputer(req.socket.remoteAddress)) return next(); // the page explains what to do
+  res.redirect(`http://localhost:${cfg.server.port}/comms/engine`);
+});
+
 const pages = {
   '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html', '/tv/:org/:dash': 'dashboard.html',
   '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/people': 'people.html', '/schedule': 'schedule.html', '/gear': 'gear.html', '/settings': 'settings.html',

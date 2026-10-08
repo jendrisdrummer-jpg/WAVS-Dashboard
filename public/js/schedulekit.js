@@ -59,25 +59,27 @@ export function planLabel(plan = {}) {
   return `Keeps the order of service that's loaded${pl}`;
 }
 
-/** "↶ Undo" and "End service" buttons (Home and the Schedule page). Returns true if it handled the click. */
-export async function scheduleAction(e) {
+/**
+ * "↶ Undo", "Clear" and "End service" buttons (Home and the Schedule page). Returns true right
+ * away if the click was one of them (the confirmation then opens), false otherwise.
+ */
+export function scheduleAction(e) {
   const sc = store.schedule;
-  const live = sc.services.find(async (s) => s.id === sc.liveId);
-  const run = async (url, ok) => api('POST', url).then(async () => toast(ok)).catch(async (err) => toast(err.message, true));
+  const live = sc.services.find((s) => s.id === sc.liveId);
+  const run = (url, ok) => api('POST', url).then(() => toast(ok)).catch((err) => toast(err.message, true));
+  const ask = async (msg, url, ok) => { if (await confirmBox(msg)) run(url, ok); };
   if (e.target.closest('[data-undo]')) {
-    const msg = live
+    ask(live
       ? `Undo “${live.name}” going live? Everything goes back to how it was just before: the service that was live, everyone's mics and the order of service. ${live.name} goes back to planned and won't go live by itself again (use Go live or Next service when you're ready).`
-      : 'Undo? The service you ended (or the order of service you cleared) comes back, with everyone\'s mics.';
-    if (await confirmBox(msg)) run('/api/schedule/undo', 'Back to how it was');
+      : 'Undo? The service you ended (or the order of service you cleared) comes back, with everyone\'s mics.', '/api/schedule/undo', 'Back to how it was');
     return true;
   }
   if (e.target.closest('[data-clear]')) {
-    if (await confirmBox('Clear the order of service that\'s still loaded? Dashboards then show “No service live” and what\'s next. (Undo puts it back.)')) run('/api/schedule/clear', 'Cleared');
+    ask('Clear the order of service that\'s still loaded? Dashboards then show “No service live” and what\'s next. (Undo puts it back.)', '/api/schedule/clear', 'Cleared');
     return true;
   }
-  if (!live) return false;
-  if (e.target.closest('[data-end]')) {
-    if (await confirmBox(`End “${live.name}”? It's marked done, and its order of service, countdowns and mic assignments are cleared from the dashboards until the next service goes live (by itself at its usual time, if that's on). Undo brings it back.`)) run('/api/schedule/end', `${live.name} ended`);
+  if (live && e.target.closest('[data-end]')) {
+    ask(`End “${live.name}”? It's marked done, and its order of service, countdowns and mic assignments are cleared from the dashboards until the next service goes live (by itself at its usual time, if that's on). Undo brings it back.`, '/api/schedule/end', `${live.name} ended`);
     return true;
   }
   return false;
