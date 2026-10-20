@@ -69,6 +69,27 @@ test('mongodb: save, read, list and remove', { skip: !MONGO && 'set WAVS_TEST_MO
   } finally { await docs.db.dropDatabase(); await docs.close(); }
 });
 
+test('mongodb: changes made while an earlier one is still saving are all saved, in order', { skip: !MONGO && 'set WAVS_TEST_MONGODB' }, async () => {
+  const docs = await mongo();
+  try {
+    // Like several sign-ups in a row: each save starts while the one before is still on its way.
+    for (let i = 1; i <= 5; i++) {
+      docs.put('users.json', { users: Array.from({ length: i }, (_, j) => `user${j + 1}`) });
+      docs.put(`orgs/o${i}/settings.json`, { n: i });
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    docs.put('orgs/o9/settings.json', { n: 9 });
+    await docs.remove('orgs/o9');
+    docs.put('orgs/o9/settings.json', { n: 10 }); // written again after it was removed
+    await docs.flush();
+    const again = await mongo({ dbName: docs.db.databaseName });
+    assert.deepEqual(again.get('users.json').users, ['user1', 'user2', 'user3', 'user4', 'user5']);
+    assert.deepEqual([1, 2, 3, 4, 5].map((i) => again.get(`orgs/o${i}/settings.json`).n), [1, 2, 3, 4, 5]);
+    assert.deepEqual(again.get('orgs/o9/settings.json'), { n: 10 });
+    await again.close();
+  } finally { await docs.db.dropDatabase(); await docs.close(); }
+});
+
 test('mongodb: a change on one computer reaches the other', { skip: !MONGO && 'set WAVS_TEST_MONGODB' }, async () => {
   const a = await mongo();
   const b = await mongo({ dbName: a.db.databaseName });

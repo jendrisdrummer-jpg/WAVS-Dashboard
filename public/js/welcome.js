@@ -3,6 +3,14 @@ import { start, store, esc, api, toast, icon } from './common.js';
 import { deviceForm, enhanceForm, readForm, runTest } from './forms.js';
 
 await start({ page: 'welcome' });
+
+// The website can't reach gear on a venue's network yet (the venue computer will connect it).
+if (store.config.hosted) {
+  const n = document.createElement('div');
+  n.className = 'hosted-note';
+  n.innerHTML = '<b>On the website, gear connects through a computer at your venue.</b> That small program is coming in the next update. Until then you can add your gear here (it waits for that computer), and use <b>demo</b> gear to try out the dashboards.';
+  document.querySelector('main').prepend(n);
+}
 if (store.config.setupComplete && !new URLSearchParams(location.search).has('again')) location.replace('/');
 
 const s = await api('GET', '/api/settings');

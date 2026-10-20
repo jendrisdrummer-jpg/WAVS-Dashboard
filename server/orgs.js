@@ -284,6 +284,21 @@ export class OrgRegistry {
     if (data) await this.docs.putFile(`${this.prefix(id)}logo.${ext}`, data);
   }
 
+  /** The key in this organization's TV links on the website (made on first use). */
+  tvKey(id) {
+    const k = `${this.prefix(id)}tv.json`;
+    let key = this.docs.get(k)?.key;
+    if (!key) { key = crypto.randomBytes(12).toString('base64url'); this.docs.put(k, { key }); }
+    return key;
+  }
+
+  tvKeyOk(id, key) {
+    if (!this.data.orgs.some((o) => o.id === id)) return false;
+    const want = Buffer.from(this.docs.get(`${this.prefix(id)}tv.json`)?.key || '');
+    const got = Buffer.from(String(key || ''));
+    return want.length > 0 && want.length === got.length && crypto.timingSafeEqual(want, got);
+  }
+
   close() { this.unwatch(); }
 }
 

@@ -35,8 +35,10 @@ export function checkPin(expected, given) {
  */
 export class Runtime extends EventEmitter {
   /** place: where this organization's things are saved ({ docs, prefix }, or a data folder). */
-  constructor({ orgId, place, settings, accounts = () => false }) {
+  /** cloud: running on the website, which can't reach a venue's gear (only the demo gear runs). */
+  constructor({ orgId, place, settings, accounts = () => false, cloud = false }) {
     super();
+    this.cloud = cloud;
     this.orgId = orgId;
     this.settings = settings;
     this.hub = new Hub();
@@ -58,16 +60,17 @@ export class Runtime extends EventEmitter {
 
   /** Real drivers for devices with an address; a placeholder for ones still waiting for their IP. */
   driver(section, Driver, cfg) {
-    if (cfg.type === 'simulator' || cfg.host) return new Driver(cfg, this.hub, micIdFor);
+    if (cfg.type === 'simulator' || (cfg.host && !this.cloud)) return new Driver(cfg, this.hub, micIdFor);
     const { hub } = this;
+    const why = this.cloud ? 'Connects through the venue computer (coming soon). The website can\'t reach gear on your network yet.' : 'No IP address yet. Add it on the Gear page.';
     return {
       start() {
-        hub.update(section, cfg.id, { name: cfg.name || cfg.id, type: cfg.type, host: '', online: false, placeholder: true, error: 'No IP address yet. Add it on the Gear page.' });
+        hub.update(section, cfg.id, { name: cfg.name || cfg.id, type: cfg.type, host: cfg.host || '', online: false, placeholder: true, error: why });
         for (let ch = 1; section === 'receivers' && ch <= cfg.channels; ch++) hub.update('mics', micIdFor(cfg.id, ch), { online: false });
       },
       stop() {},
       async thumbnail() { return null; },
-      async setStageMessage() { throw new Error(`${cfg.name} has no IP address yet`); },
+      async setStageMessage() { throw new Error(why); },
     };
   }
 

@@ -32,7 +32,7 @@ const ptting = () => talking.size > 0;
 // ---------------------------------------------------------------- socket
 
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws${location.search.match(/[?&]org=[^&]+/) ? `?${location.search.match(/org=[^&]+/)[0]}` : ''}`);
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => send({ t: 'hello', role: 'member', token: localStorage.getItem(TOKEN) });
   ws.onclose = () => {

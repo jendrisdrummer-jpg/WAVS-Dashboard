@@ -79,7 +79,8 @@ export function readBackup(buf, password = '') {
  * choices: { [orgIdInBackup]: 'new' | 'replace' | 'skip' }   ('replace' only if it exists here)
  * Returns { imported: [{ from, id, name, mode }], users: { added, updated } }
  */
-export async function importBackup({ data, orgs, auth, choices = {} }) {
+/** withUsers: false on the website, where a backup can't add or change accounts. */
+export async function importBackup({ data, orgs, auth, choices = {}, withUsers = true }) {
   const imported = [];
   const idMap = {};
   for (const o of data.orgs) {
@@ -116,6 +117,7 @@ export async function importBackup({ data, orgs, auth, choices = {} }) {
   // password here and just gain the roles; new ones are added with the password they had.
   let added = 0;
   let updated = 0;
+  if (!withUsers) return { imported, users: { added, updated } };
   const hadOwner = auth.data.users.some((u) => u.owner);
   for (const u of data.users || []) {
     const roles = {};
