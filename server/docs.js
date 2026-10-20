@@ -139,7 +139,8 @@ export class MongoDocs extends EventEmitter {
     }
     const client = new MongoClient(uri, { serverSelectionTimeoutMS: timeoutMs, appName: 'wavs-dashboard' });
     const fromUri = client.options?.dbName;
-    const db = client.db(dbName || (fromUri && fromUri !== 'test' ? fromUri : DB_NAME));
+    // A database named in the connection string wins; otherwise dbName, otherwise "wavs".
+    const db = client.db(fromUri && fromUri !== 'test' ? fromUri : dbName || DB_NAME);
     const docs = new MongoDocs(client, db, uri, mirrorDir);
     try {
       await client.connect();
@@ -174,7 +175,8 @@ export class MongoDocs extends EventEmitter {
     this.fileCache = new Map(); // key -> { data, type } (recently used photos)
     this.fileCacheBytes = 0;
     this.queue = []; // writes, in order
-    this.latest = new Map(); // key -> JSON text waiting to be written
+    this.latest = new Map(); // key -> newest JSON text not saved yet (while any write of it is waiting)
+    this.waiting = new Map(); // key -> how many queued writes of it are left
     this.busy = false;
     this.offline = false;
     this.error = null;
@@ -245,7 +247,15 @@ export class MongoDocs extends EventEmitter {
     const k = cleanKey(key);
     const json = JSON.stringify(data);
     this.cache.set(k, json);
-    if (!this.latest.has(k)) this.queue.push({ op: 'put', key: k });
+    // Each write carries its own copy and they're saved in order. Back-to-back saves of the same
+    // document that hasn't started saving yet become one.
+    const last = this.queue[this.queue.length - 1];
+    const started = this.busy && this.queue.length === 1;
+    if (last && last.op === 'put' && last.key === k && !started) last.json = json;
+    else {
+      this.queue.push({ op: 'put', key: k, json });
+      this.waiting.set(k, (this.waiting.get(k) || 0) + 1);
+    }
     this.latest.set(k, json);
     this.saveMirror();
     this.kick();
@@ -346,6 +356,7 @@ export class MongoDocs extends EventEmitter {
       try {
         await this.run(item);
         this.queue.shift();
+        this.settled(item);
         item.resolve?.();
         if (this.error) { this.error = null; this.emit('status'); }
         wait = 1000;
@@ -353,6 +364,7 @@ export class MongoDocs extends EventEmitter {
         // A change that can never be saved (too big, bad data) isn't retried forever.
         if (!retryable(e)) {
           this.queue.shift();
+          this.settled(item);
           console.error(`[data] couldn't save ${item.key || item.prefix}: ${e.message}`);
           item.reject?.(new Error(friendlyMongoError(e)));
           continue;
@@ -366,13 +378,18 @@ export class MongoDocs extends EventEmitter {
     if (!this.queue.length) for (const r of this.idle.splice(0)) r();
   }
 
+  /** A queued write is done (or given up): nothing of that document waiting any more? */
+  settled(item) {
+    if (item.op !== 'put') return;
+    const n = (this.waiting.get(item.key) || 1) - 1;
+    if (n > 0) this.waiting.set(item.key, n);
+    else { this.waiting.delete(item.key); this.latest.delete(item.key); }
+  }
+
   async run(item) {
     const meta = { by: this.writer, at: new Date() };
     if (item.op === 'put') {
-      const json = this.latest.get(item.key);
-      if (json === undefined) return; // removed since
-      await this.docsCol.replaceOne({ _id: item.key }, { json, ...meta }, { upsert: true });
-      if (this.latest.get(item.key) === json) this.latest.delete(item.key);
+      await this.docsCol.replaceOne({ _id: item.key }, { json: item.json, ...meta }, { upsert: true });
     } else if (item.op === 'putFile') {
       await this.filesCol.replaceOne({ _id: item.key }, { data: item.data, type: item.type, size: item.data.length, ...meta }, { upsert: true });
     } else if (item.op === 'removeFile') {
@@ -553,11 +570,13 @@ export function saveDatabaseConfig(dataDir, uri) {
  * Open where this computer saves things. With a cloud database that's still empty, the setup
  * already on this computer is copied there first, so nothing is lost.
  */
-export async function openDocs(dataDir) {
+export async function openDocs(dataDir, { dbName, hosted = false } = {}) {
   const local = FileDocs.at(dataDir);
   const conf = databaseConfig(dataDir);
   if (!conf) return local;
-  const docs = await MongoDocs.connect(conf.uri, { mirrorDir: path.join(dataDir, 'cloud-copy'), offlineOk: true });
+  // The website: no copy on its (temporary) disk, and nothing to bring over from it.
+  if (hosted) return MongoDocs.connect(conf.uri, { dbName });
+  const docs = await MongoDocs.connect(conf.uri, { dbName, mirrorDir: path.join(dataDir, 'cloud-copy'), offlineOk: true });
   if (!hasSetup(docs) && hasSetup(local)) {
     const n = await copyAll(local, docs);
     console.log(`[data] copied this computer's setup to MongoDB (${n.docs} documents, ${n.files} photos and logos)`);

@@ -503,6 +503,17 @@ Viewing dashboards stays open on your network, so TVs and confidence monitors ke
 
 Forgotten password: an admin clicks **Reset password** and passes on the temporary password. People change their own password from their name in the top bar. Accounts, sessions and invites are stored in the data folder (`users.json`, `sessions.json`). Passwords are stored only as scrypt hashes.
 
+## On the web (accounts for everyone)
+
+The dashboard can also run as a website where anyone you invite signs up and gets their own
+organization (beta testers, other churches). It costs $0 to start on Render's free plan with
+MongoDB Atlas. Step-by-step: [docs/HOSTING.md](docs/HOSTING.md).
+- **Website mode** is `WAVS_HOSTED=1`.
+- Every organization runs at the same time, and teams only see their own data.
+- **Website sign-ups** in Settings lets the site owner choose open, beta code or closed.
+- TV links carry a key so TVs don't sign in. Comms join links name the organization.
+- The website can't reach gear on a venue's network yet: the venue computer program comes next.
+
 ## Running it permanently
 
 The installer above sets the dashboard up as a background service:

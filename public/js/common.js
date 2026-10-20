@@ -37,6 +37,8 @@ export async function start({ page }) {
   const res = await fetch('/api/config');
   if (res.status === 401) { location.replace(`/login?next=${encodeURIComponent(location.pathname + location.search)}`); await new Promise(() => {}); }
   store.config = await res.json();
+  // Website, signed in, not on any organization's team yet: start one.
+  if (store.config.noOrg) { await firstOrg(); await new Promise(() => {}); }
   // Pages for a higher role than this account has: back to Home (the server enforces it anyway).
   const need = PAGE_ROLE[page];
   if (need && !can(need)) {
@@ -62,6 +64,20 @@ export async function start({ page }) {
     check();
   });
   setTimeout(requestRender); // pages register their renderers right after start() resolves
+}
+
+async function firstOrg() {
+  document.body.innerHTML = '<main class="auth-page"></main>';
+  for (;;) {
+    const r = await ask({
+      title: `Welcome${store.config.auth?.user ? `, ${store.config.auth.user.name}` : ''}`,
+      message: "You're not on any organization's team yet. Create one for your church or company, or ask its admin for an invite link.",
+      fields: [{ name: 'name', label: 'Organization name', placeholder: 'e.g. Grace Church', required: true, maxlength: 60 }],
+      ok: 'Create',
+    });
+    if (!r) { await fetch('/api/auth/logout', { method: 'POST' }); location.replace('/login'); return; }
+    try { await api('POST', '/api/orgs', { name: r.name }); location.replace('/welcome'); return; } catch (err) { toast(err.message, true); }
+  }
 }
 
 function connect() {
@@ -242,8 +258,8 @@ function renderHeader(page) {
           <div class="org-menu-head">Organization</div>
           ${cfg.orgs.map((o) => `<button role="menuitem" data-org="${esc(o.id)}" class="${o.id === cfg.orgId ? 'cur' : ''}">
             <span class="org-dot" style="background:${esc(o.color)}"></span>${esc(o.name)}${o.id === cfg.orgId ? icon('check') : ''}</button>`).join('')}
-          ${can('admin') ? `<hr><button role="menuitem" data-org-add>${icon('plus')} Add organization</button>
-          <a role="menuitem" href="/settings">${icon('settings')} Organization settings</a>` : ''}
+          ${can('admin') || cfg.site?.canCreateOrg ? `<hr><button role="menuitem" data-org-add>${icon('plus')} Add organization</button>` : ''}
+          ${can('admin') ? `<a role="menuitem" href="/settings">${icon('settings')} Organization settings</a>` : ''}
         </div>
       </div>
       <div data-slot class="slot"></div>
@@ -266,13 +282,14 @@ function renderHeader(page) {
     const sw = e.target.closest('[data-org]');
     if (sw && sw.dataset.org !== cfg.orgId) {
       const name = cfg.orgs.find((o) => o.id === sw.dataset.org)?.name;
-      if (!await confirmBox(`Every screen will change to ${name}'s gear, people and dashboards.`, { title: `Switch to ${name}?`, ok: 'Switch', danger: false })) return;
-      try { await api('POST', '/api/orgs/active', { id: sw.dataset.org }); } catch (err) { toast(err.message, true); }
+      // Website: only this browser switches. Host computer: every screen follows.
+      if (!cfg.hosted && !await confirmBox(`Every screen will change to ${name}'s gear, people and dashboards.`, { title: `Switch to ${name}?`, ok: 'Switch', danger: false })) return;
+      try { await api('POST', '/api/orgs/active', { id: sw.dataset.org }); if (cfg.hosted) location.replace('/'); } catch (err) { toast(err.message, true); }
     }
     if (e.target.closest('[data-org-add]')) {
       const name = await askText('Name', '', { title: 'New organization', ok: 'Add' });
       if (!name?.trim()) return;
-      try { await api('POST', '/api/orgs', { name: name.trim() }); } catch (err) { toast(err.message, true); }
+      try { await api('POST', '/api/orgs', { name: name.trim() }); if (cfg.hosted) location.replace('/welcome'); } catch (err) { toast(err.message, true); }
     }
   });
 

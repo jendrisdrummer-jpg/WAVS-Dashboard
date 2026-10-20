@@ -1201,3 +1201,9 @@ body.as-lead .lead-only-hide { display: none !important; }
   .home-hero .hero-stat b { font-size: 14px; }
   .check-steps { grid-template-columns: 1fr; }
 }
+
+/* Settings → Website sign-ups (site owner) */
+.site-share { display: flex; gap: 24px; flex-wrap: wrap; }
+.site-code { font-size: 20px; letter-spacing: 2px; font-weight: 700; }
+.site-orgs { margin: 6px 0 0; padding-left: 18px; }
+.hosted-note { border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; font-size: 14px; }

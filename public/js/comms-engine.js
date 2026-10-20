@@ -53,7 +53,7 @@ $('start').onclick = async () => {
 window.addEventListener('beforeunload', (e) => { if (ctx) { e.preventDefault(); e.returnValue = ''; } });
 
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws${location.search.match(/[?&]org=[^&]+/) ? `?${location.search.match(/org=[^&]+/)[0]}` : ''}`);
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => { send({ t: 'hello', role: 'engine', pin: localStorage.getItem('wavs-pin') || undefined }); setTimeout(reportDevices, 500); };
   ws.onclose = () => {

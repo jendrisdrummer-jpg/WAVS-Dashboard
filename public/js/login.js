@@ -1,4 +1,5 @@
-// Sign in, accept an invite (/join/<code>), or create the owner account on first use.
+// Sign in, accept an invite (/join/<code>), create the owner account on first use, or (on the
+// website) sign up with a new organization (/signup).
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const params = new URLSearchParams(location.search);
@@ -41,6 +42,25 @@ if (invite) {
     $('lead').textContent = e.message;
     form.classList.add('hidden');
   }
+} else if (cfg?.hosted && location.pathname === '/signup') {
+  mode = 'signup';
+  if (cfg.signups === 'closed') {
+    $('title').textContent = 'Sign-ups are closed for now';
+    $('lead').textContent = 'Ask your team\'s admin for an invite link, or check back soon.';
+    form.classList.add('hidden');
+  } else {
+    $('title').textContent = 'Create your account';
+    $('lead').textContent = 'You get your own organization: people, schedules, dashboards and comms for your team.';
+    for (const id of ['f-name', 'f-org']) show(id, true);
+    show('f-code', cfg.signups === 'code');
+    form.elements.name.required = true;
+    form.elements.orgName.required = true;
+    $('f-code').querySelector('span').textContent = 'Beta code (from the invitation you were sent)';
+    form.elements.password.autocomplete = 'new-password';
+    $('pw-label').textContent = 'Password (at least 8 characters)';
+    $('submit').textContent = 'Create account';
+    $('foot').innerHTML = 'Already have an account? <a href="/login">Sign in</a>. Joining an existing team? Use the invite link their admin sent you.';
+  }
 } else if (cfg && !cfg.auth?.enabled) {
   mode = 'owner';
   $('title').textContent = 'Create the admin account';
@@ -52,19 +72,21 @@ if (invite) {
   show('f-pin', Boolean(cfg.pinRequired));
   $('submit').textContent = 'Create account';
 } else {
-  $('lead').textContent = cfg?.org ? `${cfg.org.name} production dashboard` : '';
+  $('lead').textContent = cfg?.hosted && !cfg.auth?.role ? `Sign in to ${cfg.org?.name || 'WAVS Dashboard'}` : cfg?.org ? `${cfg.org.name} production dashboard` : '';
   $('foot').textContent = "Forgot your password? Ask an admin to reset it. New here? Ask an admin for an invite link.";
-  if (cfg?.auth?.user && !cfg.auth.role) $('err').textContent = `Signed in as ${cfg.auth.user.name}, but this account has no access to ${cfg.org.name}. Ask an admin, or sign in with another account.`;
+  if (cfg?.hosted && cfg.signups !== 'closed') $('foot').innerHTML = 'New here? <a href="/signup">Create an account</a>. Joining a team? Use the invite link from its admin. Forgot your password? Ask your admin.';
+  if (cfg?.auth?.user && !cfg.auth.role && !cfg.hosted) $('err').textContent = `Signed in as ${cfg.auth.user.name}, but this account has no access to ${cfg.org.name}. Ask an admin, or sign in with another account.`;
 }
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   $('err').textContent = '';
   const f = form.elements;
-  const body = { name: f.name.value, username: f.username.value, password: f.password.value, pin: f.pin.value };
+  const body = { name: f.name.value, username: f.username.value, password: f.password.value, pin: f.pin.value, orgName: f.orgName.value, code: f.code.value };
   $('submit').disabled = true;
   try {
     if (mode === 'owner') await post('/api/auth/owner', body);
+    else if (mode === 'signup') { await post('/api/auth/signup', body); location.replace('/welcome'); return; }
     else if (mode === 'invite') await post(`/api/auth/invite/${invite}`, body);
     else await post('/api/auth/login', body);
     location.replace(mode === 'login' ? next : '/');

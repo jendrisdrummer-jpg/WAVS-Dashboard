@@ -117,19 +117,21 @@ Plain HTML, CSS and JavaScript (ES modules), served as-is. No framework, no bund
 | Off-site access | Cloudflare tunnel (quick link, or a named tunnel on your own domain); sign-in always required |
 | TVs / signage | Any browser (Fire TV + AbleSign, smart TVs) with a TV link (`/tv/<org>/<dashboard>`) |
 
-## Moving to a hosted website (in progress)
+## The hosted website
 
-The plan for a real website with accounts, hosted on Vercel:
+Steps to a real website with accounts:
 1. **Storage in MongoDB** (done): the setup can live in MongoDB Atlas instead of one computer's folder.
-2. **Website on Vercel + realtime**: pages, sign-in and data editing on Vercel, reading and writing
-   the same MongoDB. Live state and commands go through a realtime service (Ably), because Vercel
-   can't keep WebSockets open.
+2. **The website** (done): the same server in website mode (`WAVS_HOSTED=1`) on an always-on Node
+   host (Render's free plan to start; `render.yaml`, `Dockerfile`), on MongoDB. Anyone invited signs
+   up with their own organization, every organization runs at once, and teams only see their own
+   data. An always-on host keeps WebSockets (live updates, comms), so no paid realtime service or
+   rewrite is needed, which a serverless host like Vercel would require. See
+   [HOSTING.md](HOSTING.md).
 3. **Installable venue agent** (Windows, macOS, Linux): the gear connections from `server/` as a
    background program at each venue. It connects outbound (no router changes) and keeps the
    venue's screens running on the local network if the internet drops.
 
-Gear can't be reached from the cloud, so a computer at the venue is always part of it. Until then,
-**Use from anywhere** with a named Cloudflare tunnel on your own domain gives a public address.
+Gear can't be reached from the cloud, so a computer at the venue is always part of it.
 
 ## Testing
 

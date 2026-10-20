@@ -109,17 +109,30 @@ list.addEventListener('click', async (e) => {
   if (!b) return;
   const o = cfg.orgs.find((x) => x.id === (b.dataset.switch || b.dataset.del));
   try {
-    if (b.dataset.switch && await confirmBox(`Switch every screen to ${o.name}?`)) await api('POST', '/api/orgs/active', { id: o.id });
+    if (b.dataset.switch && (cfg.hosted || await confirmBox(`Switch every screen to ${o.name}?`))) {
+      await api('POST', '/api/orgs/active', { id: o.id });
+      if (cfg.hosted) location.reload();
+    }
     if (b.dataset.del && await confirmBox(`Delete ${o.name}? Its gear, people, photos, dashboards and plans are removed for good.`)) {
       await api('DELETE', `/api/orgs/${encodeURIComponent(o.id)}`);
+      if (cfg.hosted) location.reload();
     }
   } catch (err) { toast(err.message, true); }
 });
 document.getElementById('org-add').onclick = async () => {
   const name = await askText('Name of the new organization (e.g. "Acme Productions")');
   if (!name?.trim()) return;
-  try { await api('POST', '/api/orgs', { name: name.trim() }); } catch (err) { toast(err.message, true); }
+  try { await api('POST', '/api/orgs', { name: name.trim() }); if (cfg.hosted) location.replace('/welcome'); } catch (err) { toast(err.message, true); }
 };
+
+// The website: no computer to manage here, sign-in is always required, and each browser picks its organization.
+if (cfg.hosted) {
+  for (const id of ['computer', 'security']) document.getElementById(id).classList.add('hidden');
+  document.querySelector('#orgs .panel-body > p.muted').textContent = 'Each organization has its own gear, people, dashboards, plans and branding. Switching only changes this browser.';
+  document.getElementById('data-dir').closest('p').classList.add('hidden');
+  list.querySelectorAll('.org-row.cur .chip').forEach((c) => { c.textContent = 'Open'; });
+  list.querySelectorAll('[data-switch]').forEach((b) => { b.lastChild.textContent = ' Open'; });
+}
 
 if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
 
@@ -149,8 +162,8 @@ async function drawAccounts() {
     : `<select data-role="${esc(u.id)}" ${u.id === me.id ? 'disabled' : ''} aria-label="Role for ${esc(u.name)}">
         <option value="">No access</option>${Object.entries(ROLE_LABEL).map(([v, l]) => `<option value="${v}" ${u.role === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`);
   acct.innerHTML = `
-    <label class="cb"><input type="checkbox" id="require-login" ${d.requireLogin ? 'checked' : ''}> Require sign-in to view dashboards</label>
-    <small class="muted">Off: anyone on your network can <i>view</i> (handy for TVs); changes always need an account. On: everyone signs in first. The comms phone page never needs an account.</small>
+    ${cfg.hosted ? '<small class="muted">Everyone signs in to the website. TVs use their TV link (Dashboards → Copy TV link), and the comms phone page never needs an account.</small>' : `<label class="cb"><input type="checkbox" id="require-login" ${d.requireLogin ? 'checked' : ''}> Require sign-in to view dashboards</label>
+    <small class="muted">Off: anyone on your network can <i>view</i> (handy for TVs); changes always need an account. On: everyone signs in first. The comms phone page never needs an account.</small>`}
 
     <h3 class="sub-h">Invite people to ${esc(cfg.org.name)}</h3>
     <form class="acct-invite" id="invite-form">
@@ -498,8 +511,47 @@ comp.addEventListener('click', async (e) => {
     drawComputer();
   }
 });
-drawComputer();
-loadRemote();
+if (!cfg.hosted) { drawComputer(); loadRemote(); }
+
+// ---------------------------------------------------------------- the website: sign-ups (site owner)
+async function drawSite() {
+  const body = document.getElementById('site-body');
+  let d;
+  try { d = await api('GET', '/api/site'); } catch (err) { body.innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
+  const link = `${location.origin}/signup`;
+  body.innerHTML = `
+    <label class="f"><span>Who can create an account</span><select id="site-signups">
+      <option value="code" ${d.signups === 'code' ? 'selected' : ''}>People with the beta code</option>
+      <option value="open" ${d.signups === 'open' ? 'selected' : ''}>Anyone</option>
+      <option value="closed" ${d.signups === 'closed' ? 'selected' : ''}>Nobody (invite links to a team still work)</option></select></label>
+    <div class="site-share">
+      <div><small class="muted">Sign-up page</small><div><a class="mono" href="${esc(link)}" target="_blank">${esc(link)}</a></div></div>
+      ${d.signups === 'code' ? `<div><small class="muted">Beta code</small><div class="mono site-code">${esc(d.code)}</div></div>` : ''}
+    </div>
+    <div class="row-btns"><button class="btn small" type="button" data-site-copy>Copy invitation</button>${d.signups === 'code' ? '<button class="btn small" type="button" data-site-renew>New code</button>' : ''}</div>
+    <small class="muted">Each new account gets its own organization. ${d.accounts} account${d.accounts === 1 ? '' : 's'}, ${d.orgs.length} organization${d.orgs.length === 1 ? '' : 's'}.</small>
+    ${d.orgs.length ? `<details><summary class="small">Organizations</summary><ul class="site-orgs small">${d.orgs.map((o) => `<li>${esc(o.name)} <span class="muted">· ${o.people} on the team${o.running ? ' · open now' : ''}</span></li>`).join('')}</ul></details>` : ''}`;
+  body.dataset.invite = `You're invited to try WAVS Dashboard. Create your account at ${link}${d.signups === 'code' ? ` with the beta code ${d.code}` : ''}.`;
+}
+if (cfg.hosted && cfg.site?.owner) {
+  document.getElementById('site').classList.remove('hidden');
+  drawSite();
+  const body = document.getElementById('site-body');
+  body.addEventListener('change', async (e) => {
+    if (e.target.id !== 'site-signups') return;
+    try { await api('PUT', '/api/site', { signups: e.target.value }); toast('Saved'); } catch (err) { toast(err.message, true); }
+    drawSite();
+  });
+  body.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-site-copy]')) {
+      try { await navigator.clipboard.writeText(body.dataset.invite); toast('Copied. Paste it into a message to your testers.'); } catch { await askText('Copy this', body.dataset.invite); }
+    }
+    if (e.target.closest('[data-site-renew]') && await confirmBox('Make a new beta code? The old one stops working (accounts already made keep working).', { ok: 'New code', danger: false })) {
+      try { await api('PUT', '/api/site', { newCode: true }); } catch (err) { toast(err.message, true); }
+      drawSite();
+    }
+  });
+}
 
 // ---------------------------------------------------------------- move to another computer
 const move = document.getElementById('move-body');

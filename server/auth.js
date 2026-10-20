@@ -91,6 +91,17 @@ export class Auth {
 
   rank(user, orgId) { return RANK[this.roleIn(user, orgId)] || 0; }
 
+  /** Is this account part of the organization's team (the owner only where they joined)? */
+  memberOf(user, orgId) { return Boolean(user?.roles?.[orgId]); }
+
+  /** Add someone (the owner too) to an organization's team. */
+  join(userId, orgId, role) {
+    const u = this.user(userId);
+    if (!u) throw new Error('Unknown account');
+    u.roles = { ...u.roles, [orgId]: role };
+    this.save();
+  }
+
   /** What the browser may know about an account. */
   view(u, orgId) {
     return { id: u.id, name: u.name, username: u.username, owner: Boolean(u.owner), role: this.roleIn(u, orgId), roles: u.roles, createdAt: u.createdAt, lastSeen: u.lastSeen || null };
