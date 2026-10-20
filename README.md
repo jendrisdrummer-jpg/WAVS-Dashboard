@@ -367,6 +367,11 @@ channels; an **audio out** sends comms channels to one interface output (to reco
 someone's in-ears). The interfaces listed are the ones the engine computer sees; each row shows
 ✓ Working or what went wrong.
 
+Run the comms engine in **Chrome** (or Edge) on the dashboard computer: audio *out* to an interface
+needs a browser feature Safari doesn't have yet. The engine also has to be opened on that computer's
+own address (`http://localhost:8080/comms/engine`); opened there by its network name it switches to
+localhost by itself, because browsers only allow microphones and live audio on secure pages.
+
 
 Your crew talk and listen through their phone's browser. Nothing needs installing.
 
@@ -438,6 +443,9 @@ You can change the thresholds under `alerts:` in the config.
   Allen & Heath and Behringer/Midas consoles, Companion variables, YouTube/Facebook viewer counts.
 
 ## Architecture
+
+The full list of technologies (server, browser, comms, storage, how it runs) is in [docs/TECH_STACK.md](docs/TECH_STACK.md).
+
 
 ```
  ProPresenter ──HTTP──┐

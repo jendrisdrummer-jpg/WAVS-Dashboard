@@ -813,7 +813,7 @@ body.cx { min-height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-in
 .cc-more { display: inline-block; position: relative; }
 .cc-more summary { list-style: none; }
 .cc-more summary::-webkit-details-marker { display: none; }
-.cc-more-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; display: grid; min-width: 220px; box-shadow: 0 12px 30px rgba(0, 0, 0, .5); }
+.cc-more-menu { position: fixed; z-index: 50; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; display: grid; min-width: 220px; box-shadow: 0 12px 30px rgba(0, 0, 0, .5); }
 .cc-more-menu button { text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
 .cc-more-menu button:hover { background: var(--panel-2); }
 .cc-more-menu .danger { color: var(--critical); }
