@@ -2,7 +2,8 @@
 
 A self-hosted production dashboard. One computer at the venue (the **host**) runs a small Node.js
 server that talks to the gear on the local network; every screen, laptop, tablet, TV and phone is
-just a web browser pointed at it. There is no build step and no cloud backend.
+just a web browser pointed at it. There is no build step. Data is saved on that computer or, optionally,
+in a cloud database (MongoDB Atlas).
 
 ```
  Gear on the venue network                Host computer (Node.js)                    Browsers
@@ -12,7 +13,7 @@ just a web browser pointed at it. There is no build step and no cloud backend.
  vMix                         ──HTTP──────┤   Express (HTTP + pages)                Dashboards, Green Room,
  ProPresenter 7               ──HTTP──────┼─▶ ws (live state, comms signalling) ◀─▶ Live service, Schedule,
  Planning Center (cloud)      ──HTTPS─────┤   Runtime per organization              Comms phones, TVs (kiosk)
- YouTube / Facebook (cloud)   ──HTTPS─────┘   JSON files on disk
+ YouTube / Facebook (cloud)   ──HTTPS─────┘   JSON files on disk, or MongoDB
                                               cloudflared (optional, off-site access)
 ```
 
@@ -24,6 +25,7 @@ just a web browser pointed at it. There is no build step and no cloud backend.
 | **Express 5** | HTTP routes (`/api/...`), pages, uploads, static files |
 | **ws** 8 | WebSockets: live state to every screen (`/ws`), comms signalling and audio relay (`/comms-ws`) |
 | **multer** | Photo and logo uploads |
+| **mongodb** (driver 7) | Optional cloud database (MongoDB Atlas): `server/docs.js` |
 | **yaml** | Reading the original `config.yaml` / demo config (settings are now saved as JSON per organization) |
 | **selfsigned** | A self-signed HTTPS certificate (port 8443) so phones may use the microphone for comms on the local network |
 | **qrcode** | QR codes for joining comms from a phone |
@@ -54,6 +56,7 @@ just a web browser pointed at it. There is no build step and no cloud backend.
 | `server/hub.js` | Live device state, broadcast to screens |
 | `server/service.js` | Order of service and where we are in it (Planning Center, ProPresenter playlist, typed plans) |
 | `server/schedule.js` | Services planned ahead, events, repeating services, auto-switching, undo |
+| `server/docs.js` | Where everything is saved: the data folder or MongoDB (with a copy on this computer for when the internet drops), and moving between them |
 | `server/store.js` | People, photos, face positions, mic assignments |
 | `server/collab.js` | Dashboards (layouts) and shared notes/checklists |
 | `server/comms.js` | Comms roster, channels, permissions, cues, signalling |
@@ -91,7 +94,14 @@ Plain HTML, CSS and JavaScript (ES modules), served as-is. No framework, no bund
 ## Data and storage
 
 - Plain **JSON files** on disk, one folder per organization (settings, people, dashboards, service
-  plan, schedule, comms), plus uploaded photos. No database server.
+  plan, schedule, comms), plus uploaded photos. No database server needed.
+- Or **MongoDB** (Settings → This computer → Where everything is saved, or `MONGODB_URI`). Two
+  collections: `docs` (each former JSON file as `{ _id: "orgs/<id>/greenroom.json", json }`) and
+  `files` (photos and logos). Every store keeps its data in memory; writes are saved in the
+  background in order and retried. Change streams bring in edits made by other computers. A copy
+  in the data folder (`cloud-copy/`) lets it start and run without internet.
+- `server/docs.js` is the one storage layer (`FileDocs` and `MongoDocs`, same interface); the
+  stores (`store.js`, `schedule.js`, `comms.js`, `auth.js`, `orgs.js`, …) don't know which one they use.
 - Location: `~/Library/Application Support/WAVS Dashboard` (macOS), `~/.wavs-dashboard` (Linux),
   `%APPDATA%\WAVS Dashboard` (Windows), or `WAVS_DATA`.
 - Backups: gzip'd JSON, optionally encrypted with a password (AES-256-GCM, scrypt key).
@@ -107,16 +117,23 @@ Plain HTML, CSS and JavaScript (ES modules), served as-is. No framework, no bund
 | Off-site access | Cloudflare tunnel (quick link, or a named tunnel on your own domain); sign-in always required |
 | TVs / signage | Any browser (Fire TV + AbleSign, smart TVs) with a TV link (`/tv/<org>/<dashboard>`) |
 
-## Why not a cloud host (e.g. Vercel)?
+## Moving to a hosted website (in progress)
 
-The server has to sit on the venue network to reach the receivers, switcher and ProPresenter, keep
-long-lived WebSocket connections open to every screen and phone, and save files to disk. Cloud
-platforms built around short-lived serverless functions (Vercel, Netlify Functions) provide none of
-those. For a public web address, use **Use from anywhere** with a named Cloudflare tunnel on your own
-domain; the dashboard keeps running on the venue computer.
+The plan for a real website with accounts, hosted on Vercel:
+1. **Storage in MongoDB** (done): the setup can live in MongoDB Atlas instead of one computer's folder.
+2. **Website on Vercel + realtime**: pages, sign-in and data editing on Vercel, reading and writing
+   the same MongoDB. Live state and commands go through a realtime service (Ably), because Vercel
+   can't keep WebSockets open.
+3. **Installable venue agent** (Windows, macOS, Linux): the gear connections from `server/` as a
+   background program at each venue. It connects outbound (no router changes) and keeps the
+   venue's screens running on the local network if the internet drops.
+
+Gear can't be reached from the cloud, so a computer at the venue is always part of it. Until then,
+**Use from anywhere** with a named Cloudflare tunnel on your own domain gives a public address.
 
 ## Testing
 
 `npm test` runs the `node:test` suites in `test/`: accounts, backups, comms, data folder, organizations,
-service plan, schedule, Shure parsing, people store, streams and updates. UI changes are checked in
+service plan, schedule, Shure parsing, people store, storage (files, and MongoDB when
+`WAVS_TEST_MONGODB` is set), streams and updates. UI changes are checked in
 headless Chromium (Playwright) against a demo server with simulated gear.

@@ -2,16 +2,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DEFAULTS, merge } from './config.js';
+import { place, FileDocs } from './docs.js';
 
 /**
- * Organizations (e.g. "Acme Productions" and "Grace Church"). Each one has its own folder
- * under data/orgs/<id>/ holding its settings (gear, branding, PIN, Planning Center),
+ * Organizations (e.g. "Acme Productions" and "Grace Church"). Each one has its own place
+ * (orgs/<id>/, see docs.js) holding its settings (gear, branding, PIN, Planning Center),
  * people and photos, dashboards, notes and service plan. One organization is active at a time
- * because it drives the physical gear; switching swaps everything.
+ * on each host computer because it drives the physical gear; switching swaps everything.
  *
- *   data/orgs.json           { active, orgs: [{ id, name }] }
- *   data/orgs/<id>/settings.json
- *   data/orgs/<id>/greenroom.json, dashboards.json, board.json, service.json, uploads/, logo.*
+ *   orgs.json           { orgs: [{ id, name }] }
+ *   host.json           { active }  (this computer only)
+ *   orgs/<id>/settings.json
+ *   orgs/<id>/greenroom.json, dashboards.json, board.json, service.json, uploads/, logo.*
  */
 
 /** Everything an organization can configure in the browser (no server settings). */
@@ -165,38 +167,53 @@ export function mergeIncoming(saved, incoming) {
 }
 
 export class OrgRegistry {
-  constructor(dataDir) {
-    this.dataDir = dataDir;
-    this.file = path.join(dataDir, 'orgs.json');
-    fs.mkdirSync(path.join(dataDir, 'orgs'), { recursive: true });
-    this.data = fs.existsSync(this.file) ? JSON.parse(fs.readFileSync(this.file, 'utf8')) : { active: null, orgs: [] };
+  /**
+   * target: a data folder, or { docs } (see docs.js). local: this computer's own folder
+   * (FileDocs), which remembers which organization is active here; with a cloud database each
+   * host computer can run a different one.
+   */
+  constructor(target, { local } = {}) {
+    ({ docs: this.docs } = place(target, ''));
+    this.local = local || (typeof target === 'string' ? FileDocs.at(target) : this.docs);
+    this.load();
+    this.unwatch = this.docs.watch('orgs.json', () => { this.load(); this.onChange?.(); });
+  }
+
+  load() {
+    const saved = this.docs.get('orgs.json') || {};
+    const orgs = Array.isArray(saved.orgs) ? saved.orgs : [];
+    // Older versions kept the active organization in orgs.json.
+    const here = this.local.get('host.json')?.active ?? saved.active ?? null;
+    this.data = { active: orgs.some((o) => o.id === here) ? here : null, orgs };
   }
 
   save() {
-    const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    fs.renameSync(tmp, this.file);
+    this.docs.put('orgs.json', { orgs: this.data.orgs });
+    this.local.put('host.json', { ...(this.local.get('host.json') || {}), active: this.data.active });
   }
 
-  dir(id) { return path.join(this.dataDir, 'orgs', id); }
+  /** Where an organization's documents and photos are saved ("orgs/<id>/"). */
+  prefix(id) { return `orgs/${id}/`; }
+
+  /** For the stores (GreenroomStore, Schedule, …): { docs, prefix }. */
+  place(id) { return { docs: this.docs, prefix: this.prefix(id) }; }
 
   list() { return this.data.orgs.map(({ id, name }) => ({ id, name, color: this.read(id).org.theme.accent })); }
 
   read(id) {
-    const f = path.join(this.dir(id), 'settings.json');
-    return normalizeSettings(fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {});
+    return normalizeSettings(this.docs.get(`${this.prefix(id)}settings.json`) || {});
   }
 
   write(id, settings) {
     const s = normalizeSettings(settings);
-    fs.mkdirSync(this.dir(id), { recursive: true });
-    const f = path.join(this.dir(id), 'settings.json');
-    fs.writeFileSync(`${f}.tmp`, JSON.stringify(s, null, 2));
-    fs.renameSync(`${f}.tmp`, f);
+    this.docs.put(`${this.prefix(id)}settings.json`, s);
     const entry = this.data.orgs.find((o) => o.id === id);
     if (entry && entry.name !== s.org.name) { entry.name = s.org.name; this.save(); }
     return s;
   }
+
+  /** fn() when an organization's settings are changed on another computer (or the website). */
+  watchSettings(id, fn) { return this.docs.watch(`${this.prefix(id)}settings.json`, fn); }
 
   create(name, settings = {}) {
     let id = slug(name);
@@ -212,7 +229,7 @@ export class OrgRegistry {
     if (id === this.data.active) throw new Error('Switch to another organization before deleting this one');
     this.data.orgs = this.data.orgs.filter((o) => o.id !== id);
     this.save();
-    fs.rmSync(this.dir(id), { recursive: true, force: true });
+    this.docs.remove(`orgs/${id}`);
   }
 
   setActive(id) {
@@ -225,7 +242,7 @@ export class OrgRegistry {
    * First run of this version: create the first organization from config.yaml (or the demo
    * config) and move any existing people, photos, dashboards and notes into it.
    */
-  migrate(cfg) {
+  async migrate(cfg) {
     if (this.data.orgs.length) return;
     const { server, _file, ...settings } = cfg;
     const isDemo = /demo\.yaml$/.test(_file || '');
@@ -238,22 +255,36 @@ export class OrgRegistry {
       this.data.orgs = [];
       id = this.create(cfg.org.name, { org: settings.org, alerts: settings.alerts });
     }
-    for (const f of ['greenroom.json', 'dashboards.json', 'board.json', 'service.json', 'uploads']) {
-      const from = path.join(this.dataDir, f);
-      if (fs.existsSync(from)) fs.renameSync(from, path.join(this.dir(id), f));
+    const to = this.prefix(id);
+    for (const f of ['greenroom.json', 'dashboards.json', 'board.json', 'service.json']) {
+      const v = this.docs.get(f);
+      if (v !== undefined) { this.docs.put(`${to}${f}`, v); this.docs.remove(f); }
     }
+    for (const k of this.docs.list('uploads/')) {
+      const file = await this.docs.getFile(k);
+      if (file) await this.docs.putFile(`${to}${k}`, file.data, file.type);
+    }
+    this.docs.remove('uploads');
     if (cfg.org.logo) {
       const logo = path.resolve(path.dirname(_file || '.'), '..', cfg.org.logo);
-      if (fs.existsSync(logo)) fs.copyFileSync(logo, path.join(this.dir(id), `logo${path.extname(logo).toLowerCase()}`));
+      if (fs.existsSync(logo)) await this.docs.putFile(`${to}logo${path.extname(logo).toLowerCase()}`, fs.readFileSync(logo));
     }
     this.setActive(id);
     console.log(`[orgs] created organization "${cfg.org.name}" from ${path.basename(_file || 'config')}`);
   }
 
-  logoFile(id) {
-    const dir = this.dir(id);
-    return fs.existsSync(dir) ? fs.readdirSync(dir).find((f) => /^logo\.(png|jpe?g|svg|webp)$/i.test(f)) : null;
+  /** The logo's key ("orgs/<id>/logo.png"), or null. */
+  logoKey(id) {
+    return this.docs.list(`${this.prefix(id)}logo.`).find((k) => /\/logo\.(png|jpe?g|svg|webp)$/i.test(k)) || null;
   }
+
+  async setLogo(id, data, ext) {
+    const old = this.logoKey(id);
+    if (old) await this.docs.removeFile(old);
+    if (data) await this.docs.putFile(`${this.prefix(id)}logo.${ext}`, data);
+  }
+
+  close() { this.unwatch(); }
 }
 
 export const newId = () => crypto.randomUUID();

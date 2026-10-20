@@ -19,6 +19,7 @@ import { dataDirFor, oldDataCandidates, adoptOldData } from './datadir.js';
 import { Auth, RANK, sessionToken, sessionCookie } from './auth.js';
 import { localName, startLocalName, setLocalName, stopLocalName, listenPort80 } from './localname.js';
 import { createBackup, readBackup, importBackup, isEncrypted } from './backup.js';
+import { openDocs, FileDocs, MongoDocs, databaseConfig, saveDatabaseConfig, copyAll, hasSetup, mongoHost } from './docs.js';
 import { System } from './system.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
@@ -38,18 +39,35 @@ if (process.env.WAVS_SERVICE === '1') {
 }
 const system = new System(ROOT);
 const BOOT = crypto.randomUUID(); // changes on every start, so open screens can pick up a new version
-const orgs = new OrgRegistry(dataDir);
-orgs.migrate(cfg);
-const auth = new Auth(dataDir);
+// Where the setup is saved: this computer's folder, or a cloud database (Settings → This computer).
+let docs;
+let storageProblem = null;
+try {
+  docs = await openDocs(dataDir);
+} catch (e) {
+  // The cloud database can't be reached and there's no copy here yet: run from this computer's
+  // folder so the dashboard still opens, and say so in Settings.
+  storageProblem = `Couldn't open the cloud database (${e.message.replace(/\.$/, '')}). Using this computer's own copy until it's fixed; changes made now stay on this computer.`;
+  console.error(`[data] ${storageProblem}`);
+  docs = FileDocs.at(dataDir);
+}
+if (docs.kind === 'mongodb') console.log(`[data] using MongoDB at ${docs.host} (database "${docs.db.databaseName}")`);
+const orgs = new OrgRegistry({ docs }, { local: FileDocs.at(dataDir) });
+await orgs.migrate(cfg);
+const auth = new Auth({ docs });
 
 let rt = null; // Runtime for the active organization
 
+let unwatchSettings = () => {};
 function startRuntime() {
   const id = orgs.data.active || orgs.data.orgs[0].id;
-  const next = new Runtime({ orgId: id, dir: orgs.dir(id), settings: orgs.read(id), accounts: () => auth.enabled });
+  const next = new Runtime({ orgId: id, place: orgs.place(id), settings: orgs.read(id), accounts: () => auth.enabled });
   next.on('message', broadcast);
   next.start();
   rt = next;
+  // Gear or branding changed on another computer (or the website): start again with it.
+  unwatchSettings();
+  unwatchSettings = orgs.watchSettings(id, () => { console.log('[orgs] settings changed elsewhere; reconnecting'); restartRuntime(); });
   console.log(`[orgs] active organization: ${rt.settings.org.name}`);
 }
 
@@ -69,7 +87,7 @@ function publicConfig(req) {
       user: req.user ? auth.view(req.user, rt.orgId) : null,
       role: auth.enabled ? auth.roleIn(req.user, rt.orgId) : 'admin',
     },
-    org: { name: s.org.name, serviceName: s.org.serviceName, theme: s.org.theme, logo: Boolean(orgs.logoFile(rt.orgId)) },
+    org: { name: s.org.name, serviceName: s.org.serviceName, theme: s.org.theme, logo: Boolean(orgs.logoKey(rt.orgId)) },
     orgId: rt.orgId,
     orgs: orgs.list(),
     tvBase: tvBase(req),
@@ -142,13 +160,19 @@ app.use((req, res, next) => {
 
 const images = /^image\/(jpeg|png|webp|gif|heic|heif|svg\+xml)$/;
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, rt.store.uploads),
-    filename: (_req, file, cb) => cb(null, `${crypto.randomUUID()}${path.extname(file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '') || '.jpg'}`),
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => cb(null, images.test(file.mimetype) && file.mimetype !== 'image/svg+xml'),
 });
+/** A person's photo: saved with the organization (see docs.js); req.file.filename is its name. */
+const photoUpload = [upload.single('photo'), async (req, res, next) => {
+  if (!req.file) return next();
+  try {
+    req.file.filename = `${crypto.randomUUID()}${path.extname(req.file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '') || '.jpg'}`;
+    await rt.store.savePhoto(req.file.filename, req.file.buffer, req.file.mimetype);
+    next();
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}];
 const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 }, fileFilter: (_req, f, cb) => cb(null, /^image\/(png|jpeg|webp)$/.test(f.mimetype)) });
 
 const wrap = (fn) => async (req, res) => {
@@ -164,7 +188,7 @@ const signIn = (req, res, token) => res.setHeader('set-cookie', sessionCookie(to
 const clientIp = (req) => (req.viaTunnel && req.get('cf-connecting-ip')) || req.socket.remoteAddress || '';
 // What the sign-in page needs (public, even when sign-in is required to view).
 app.get('/api/auth/status', (req, res) => res.json({
-  org: { name: rt.settings.org.name, theme: rt.settings.org.theme, logo: Boolean(orgs.logoFile(rt.orgId)) },
+  org: { name: rt.settings.org.name, theme: rt.settings.org.theme, logo: Boolean(orgs.logoKey(rt.orgId)) },
   auth: { enabled: auth.enabled, user: req.user ? { name: req.user.name } : null, role: auth.roleIn(req.user, rt.orgId) },
   pinRequired: !auth.enabled && Boolean(rt.settings.security.adminPin),
 }));
@@ -254,6 +278,7 @@ app.get('/api/system', need('admin'), wrap(async (req, res) => {
     root: ROOT,
     dataDir,
     service: { running: system.asService, installed: system.serviceInstalled(), platform: process.platform },
+    storage: { ...docs.status(), problem: storageProblem },
     computerName: localName.name,
     nameConflict: localName.conflict,
     nameFixed: Boolean(process.env.WAVS_NAME),
@@ -268,12 +293,70 @@ app.put('/api/system/name', need('admin'), wrap(async (req, res) => {
   res.json({ name: localName.name, conflict: localName.conflict });
 }));
 
+// ---- where the setup is saved: this computer, or a cloud database (MongoDB Atlas)
+const ownerOnly = (req) => {
+  if (auth.enabled && !req.user?.owner) throw new Error('Only the owner can change where everything is saved');
+};
+const orgNames = (d) => (d.get('orgs.json')?.orgs || []).map((o) => o.name);
+/** After switching, start again with the new place (automatic when running in the background). */
+const restartForStorage = () => system.restartSoon();
+
+app.get('/api/system/database', need('admin'), (_req, res) => {
+  const conf = databaseConfig(dataDir);
+  res.json({ ...docs.status(), problem: storageProblem, configured: Boolean(conf), fromEnv: Boolean(conf?.fromEnv), host: conf ? mongoHost(conf.uri) : null, canRestart: system.asService });
+});
+app.post('/api/system/database/test', need('admin'), wrap(async (req, res) => {
+  ownerOnly(req);
+  const uri = String(req.body?.uri || '').trim();
+  const cloud = await MongoDocs.connect(uri, { timeoutMs: 8000 });
+  try {
+    res.json({ ok: true, host: cloud.host, db: cloud.db.databaseName, orgs: orgNames(cloud), empty: !cloud.list('').length, here: orgNames(docs) });
+  } finally { await cloud.close(); }
+}));
+// mode: 'upload' (this computer's setup goes to the database, replacing what's there) or 'use' (use what's there).
+app.post('/api/system/database', need('admin'), wrap(async (req, res) => {
+  ownerOnly(req);
+  if (databaseConfig(dataDir)?.fromEnv) throw new Error('The database is set by MONGODB_URI on this computer; change it there');
+  const uri = String(req.body?.uri || '').trim();
+  const mode = req.body?.mode === 'use' ? 'use' : 'upload';
+  const cloud = await MongoDocs.connect(uri, { timeoutMs: 8000 });
+  let copied = null;
+  try {
+    if (mode === 'use' && !hasSetup(cloud)) throw new Error('That database is empty. Choose “Move this computer\'s setup there” instead.');
+    if (mode === 'upload') {
+      await docs.flush();
+      await cloud.wipe();
+      copied = await copyAll(docs, cloud);
+    }
+  } finally { await cloud.close(); }
+  saveDatabaseConfig(dataDir, uri);
+  console.log(`[data] now saving to MongoDB at ${mongoHost(uri)}${copied ? ` (copied ${copied.docs} documents, ${copied.files} photos and logos)` : ''}`);
+  res.json({ ok: true, copied, restarting: restartForStorage() });
+}));
+// Back to this computer's folder; copyBack brings the cloud's current setup down first.
+app.delete('/api/system/database', need('admin'), wrap(async (req, res) => {
+  ownerOnly(req);
+  const conf = databaseConfig(dataDir);
+  if (conf?.fromEnv) throw new Error('The database is set by MONGODB_URI on this computer; remove it there');
+  if (!conf) throw new Error('This computer already saves everything itself');
+  let copied = null;
+  if (req.body?.copyBack && docs.kind === 'mongodb') {
+    const local = FileDocs.at(dataDir);
+    await docs.flush();
+    for (const k of ['orgs', 'orgs.json', 'users.json', 'sessions.json']) local.remove(k);
+    copied = await copyAll(docs, local);
+  }
+  saveDatabaseConfig(dataDir, null);
+  console.log('[data] now saving on this computer');
+  res.json({ ok: true, copied, restarting: restartForStorage() });
+}));
+
 // ---- move organizations between host computers (backup file)
-app.post('/api/backup', need('admin'), wrap((req, res) => {
+app.post('/api/backup', need('admin'), wrap(async (req, res) => {
   const ids = (Array.isArray(req.body?.orgs) ? req.body.orgs : [rt.orgId]).map(String);
   // An admin can take the organizations they're admin of (the owner: all of them).
   if (auth.enabled) for (const id of ids) if (auth.rank(req.user, id) < RANK.admin) throw new Error("You can only back up organizations you're an admin of");
-  const buf = createBackup({ orgs, auth, orgIds: ids, password: String(req.body?.password || '') });
+  const buf = await createBackup({ orgs, auth, orgIds: ids, password: String(req.body?.password || '') });
   const names = ids.map((id) => orgs.data.orgs.find((o) => o.id === id)?.name || id).join(' + ');
   const file = `WAVS ${names} ${new Date().toISOString().slice(0, 10)}.wavsbackup`.replace(/[^\w .+-]/g, '');
   res.set({ 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${file}"` }).send(buf);
@@ -294,7 +377,7 @@ app.post('/api/backup/inspect', need('admin'), rawBody, wrap((req, res) => {
     users: (data.users || []).length,
   });
 }));
-app.post('/api/backup/import', need('admin'), wrap((req, res) => {
+app.post('/api/backup/import', need('admin'), wrap(async (req, res) => {
   const p = pendingImports.get(String(req.body?.token));
   if (!p) throw new Error('Choose the backup file again (it expired)');
   const data = readBackup(p.buf, String(req.body?.password || ''));
@@ -303,7 +386,7 @@ app.post('/api/backup/import', need('admin'), wrap((req, res) => {
   const replacingActive = choices[rt.orgId] === 'replace';
   if (replacingActive) rt.stop();
   let result;
-  try { result = importBackup({ data, orgs, auth, choices }); } finally { if (replacingActive) startRuntime(); }
+  try { result = await importBackup({ data, orgs, auth, choices }); } finally { if (replacingActive) startRuntime(); }
   pendingImports.delete(String(req.body?.token));
   broadcast({ type: 'reload' });
   res.json({ ...result, signInNeeded: auth.enabled && !req.user });
@@ -354,28 +437,24 @@ app.post('/api/settings/test', need('admin'), wrap(async (req, res) => {
   }
   res.json(await testDevice(kind, dev));
 }));
-app.post('/api/settings/logo', need('admin'), logoUpload.single('logo'), wrap((req, res) => {
+app.post('/api/settings/logo', need('admin'), logoUpload.single('logo'), wrap(async (req, res) => {
   if (!req.file) throw new Error('Choose a PNG, JPEG or WebP image');
-  const dir = orgs.dir(rt.orgId);
-  const old = orgs.logoFile(rt.orgId);
-  if (old) fs.rmSync(path.join(dir, old), { force: true });
-  fs.writeFileSync(path.join(dir, `logo.${req.file.mimetype.split('/')[1].replace('jpeg', 'jpg')}`), req.file.buffer);
+  await orgs.setLogo(rt.orgId, req.file.buffer, req.file.mimetype.split('/')[1].replace('jpeg', 'jpg'));
   broadcast({ type: 'reload' });
   res.json({ ok: true });
 }));
-app.delete('/api/settings/logo', need('admin'), wrap((_req, res) => {
-  const old = orgs.logoFile(rt.orgId);
-  if (old) fs.rmSync(path.join(orgs.dir(rt.orgId), old), { force: true });
+app.delete('/api/settings/logo', need('admin'), wrap(async (_req, res) => {
+  await orgs.setLogo(rt.orgId, null);
   broadcast({ type: 'reload' });
   res.json({ ok: true });
 }));
 app.post('/api/gear/reconnect', need('admin'), wrap((_req, res) => { restartRuntime(); res.json({ ok: true }); }));
 
 // ---- people & mic assignments
-app.post('/api/people', need('producer'), upload.single('photo'), wrap((req, res) => {
+app.post('/api/people', need('producer'), photoUpload, wrap((req, res) => {
   res.json(rt.store.addPerson({ ...req.body, photo: req.file?.filename || null }));
 }));
-app.put('/api/people/:id', need('producer'), upload.single('photo'), wrap((req, res) => {
+app.put('/api/people/:id', need('producer'), photoUpload, wrap((req, res) => {
   const fields = { ...req.body };
   if (req.file) fields.photo = req.file.filename;
   else if (req.body.removePhoto === 'true') fields.photo = null;
@@ -563,11 +642,17 @@ const pages = {
   '/login': 'login.html', '/join/:code': 'login.html',
 };
 for (const [route, file] of Object.entries(pages)) app.get(route, (_req, res) => res.sendFile(path.join(pub, file)));
-app.get('/uploads/:file', (req, res) => res.sendFile(path.join(rt.store.uploads, path.basename(req.params.file)), { maxAge: '1h' }, (e) => e && res.status(404).end()));
-app.get('/logo', (_req, res) => {
-  const f = orgs.logoFile(rt.orgId);
-  return f ? res.sendFile(path.join(orgs.dir(rt.orgId), f), { maxAge: 0 }) : res.status(404).end();
-});
+app.get('/uploads/:file', wrap(async (req, res) => {
+  const f = await rt.store.getPhoto(req.params.file);
+  if (!f) return res.status(404).end();
+  res.set('cache-control', 'public, max-age=3600').type(f.type).send(f.data);
+}));
+app.get('/logo', wrap(async (_req, res) => {
+  const key = orgs.logoKey(rt.orgId);
+  const f = key && await orgs.docs.getFile(key);
+  if (!f) return res.status(404).end();
+  res.set('cache-control', 'no-cache').type(f.type).send(f.data);
+}));
 // Face finding for photo crops (runs in the browser; the models are bundled, so no internet needed).
 const faceApi = path.join(ROOT, 'node_modules/@vladmandic/face-api');
 app.get('/vendor/face-api.esm.js', (_req, res) => res.sendFile(path.join(faceApi, 'dist/face-api.esm.js'), { maxAge: '7d' }));
@@ -662,6 +747,7 @@ setInterval(() => {
 // ---------------------------------------------------------------- start
 
 startRuntime();
+orgs.onChange = () => broadcast({ type: 'reload' }); // organizations added or renamed elsewhere
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     console.error(`\nThe dashboard is already running (port ${cfg.server.port} is in use).`);
@@ -696,11 +782,13 @@ if (tlsPort) {
 }
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => {
+  process.on(sig, async () => {
     rt?.stop();
+    auth.flush();
     tunnel.stop();
     stopLocalName();
     server.close();
+    await docs.close(); // finish saving to the cloud database (a few seconds at most)
     process.exit(0);
   });
 }

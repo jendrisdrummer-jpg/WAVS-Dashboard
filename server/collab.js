@@ -1,26 +1,23 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { place } from './docs.js';
 
-class JsonFile extends EventEmitter {
-  constructor(file, initial) {
+/** One saved document (see docs.js), reloaded when another computer changes it. */
+class JsonDoc extends EventEmitter {
+  constructor(target, name, initial) {
     super();
-    this.file = file;
-    this.data = initial;
-    if (fs.existsSync(file)) {
-      try { this.data = { ...initial, ...JSON.parse(fs.readFileSync(file, 'utf8')) }; } catch (e) {
-        console.error(`[store] could not read ${file}: ${e.message}`);
-      }
-    }
+    ({ docs: this.docs, key: this.key } = place(target, name));
+    this.initial = initial;
+    this.data = { ...initial, ...(this.docs.get(this.key) || {}) };
+    this.unwatch = this.docs.watch(this.key, (d) => { this.data = { ...initial, ...(d || {}) }; this.emit('change', this.data); });
   }
 
   save() {
-    const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    fs.renameSync(tmp, this.file);
+    this.docs.put(this.key, this.data);
     this.emit('change', this.data);
   }
+
+  close() { this.unwatch(); }
 }
 
 const key = (k) => {
@@ -33,9 +30,9 @@ const key = (k) => {
  * Shared notes and checklists. Several widgets on different dashboards can show the same
  * note or checklist by using the same name (e.g. "producer", "stage-setup").
  */
-export class Board extends JsonFile {
-  constructor(dataDir) {
-    super(path.join(dataDir, 'board.json'), { notes: {}, checklists: {} });
+export class Board extends JsonDoc {
+  constructor(target) {
+    super(target, 'board.json', { notes: {}, checklists: {} });
   }
 
   setNote(name, text) {
@@ -75,9 +72,9 @@ export class Board extends JsonFile {
 }
 
 /** Saved dashboard layouts (one per role / screen). */
-export class Dashboards extends JsonFile {
-  constructor(dataDir, defaults) {
-    super(path.join(dataDir, 'dashboards.json'), { dashboards: [] });
+export class Dashboards extends JsonDoc {
+  constructor(target, defaults) {
+    super(target, 'dashboards.json', { dashboards: [] });
     if (!this.data.dashboards.length) {
       this.data.dashboards = defaults;
       this.save();

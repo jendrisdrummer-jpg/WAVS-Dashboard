@@ -1,7 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { place } from './docs.js';
 
 /**
  * The order of service and where we are in it.
@@ -20,16 +19,14 @@ import { EventEmitter } from 'node:events';
 export class ServiceManager extends EventEmitter {
   constructor({ dataDir, pco, cfg }) {
     super();
-    this.file = path.join(dataDir, 'service.json');
+    ({ docs: this.docs, key: this.key } = place(dataDir, 'service.json'));
     this.pco = pco;
     this.cfg = { followProPresenter: true, livePollMs: 3000, planRefreshMs: 60000, ...cfg };
     // links: per plan, which plan item each ProPresenter playlist item is ({ ppKey: itemId | 'ignore' }).
     // aliases: remembered by name for future plans ({ "pp name": "plan item title" | 'ignore' }).
     // expectPlaylist: the ProPresenter playlist this service uses (from the schedule); others are ignored.
     this.saved = { source: null, serviceTypeId: null, planId: null, manual: null, current: null, actuals: {}, links: {}, aliases: {}, expectPlaylist: '' };
-    if (fs.existsSync(this.file)) {
-      try { this.saved = { ...this.saved, ...JSON.parse(fs.readFileSync(this.file, 'utf8')) }; } catch { /* start fresh */ }
-    }
+    this.saved = { ...this.saved, ...(this.docs.get(this.key) || {}) };
     this.plan = null;
     this.upcoming = [];
     this.pcoStatus = { configured: Boolean(pco), ok: null, error: null, lastSync: null };
@@ -58,9 +55,7 @@ export class ServiceManager extends EventEmitter {
   }
 
   save() {
-    const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.saved, null, 2));
-    fs.renameSync(tmp, this.file);
+    this.docs.put(this.key, this.saved);
   }
 
   state() {

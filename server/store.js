@@ -1,7 +1,7 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { place } from './docs.js';
 
 /** The colour behind a person's photo on the mic board ("#7c3aed"), or null for automatic. */
 const cleanColor = (c) => (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : null);
@@ -10,29 +10,32 @@ export const STATUSES = ['assigned', 'picked-up', 'on-stage', 'returned'];
 
 /**
  * Green room data: people (with photos), which mic each person has, and
- * where they are in the hand-off flow. Persisted to data/greenroom.json so it
- * survives restarts; deliberately a plain JSON file so it's easy to back up or edit.
+ * where they are in the hand-off flow. Saved as greenroom.json (see docs.js); photos are
+ * saved next to it under uploads/.
  */
 export class GreenroomStore extends EventEmitter {
-  constructor(dataDir) {
+  constructor(target) {
     super();
-    this.file = path.join(dataDir, 'greenroom.json');
-    this.uploads = path.join(dataDir, 'uploads');
-    fs.mkdirSync(this.uploads, { recursive: true });
-    this.data = { service: { name: null, notes: '' }, people: [], assignments: {} };
-    if (fs.existsSync(this.file)) {
-      try { this.data = { ...this.data, ...JSON.parse(fs.readFileSync(this.file, 'utf8')) }; } catch (e) {
-        console.error(`[store] could not read ${this.file}: ${e.message}`);
-      }
-    }
+    ({ docs: this.docs, key: this.key } = place(target, 'greenroom.json'));
+    this.uploadsPrefix = this.key.replace(/greenroom\.json$/, 'uploads/');
+    const initial = { service: { name: null, notes: '' }, people: [], assignments: {} };
+    this.data = { ...initial, ...(this.docs.get(this.key) || {}) };
+    this.unwatch = this.docs.watch(this.key, (d) => { this.data = { ...initial, ...(d || {}) }; this.emit('change', this.data); });
   }
 
   save() {
-    const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    fs.renameSync(tmp, this.file);
+    this.docs.put(this.key, this.data);
     this.emit('change', this.data);
   }
+
+  close() { this.unwatch(); }
+
+  /** Where a photo is saved ("orgs/grace/uploads/3f2c….jpg"). */
+  photoKey(file) { return `${this.uploadsPrefix}${path.basename(String(file))}`; }
+
+  savePhoto(file, data, type) { return this.docs.putFile(this.photoKey(file), data, type); }
+
+  getPhoto(file) { return this.docs.getFile(this.photoKey(file)); }
 
   person(id) { return this.data.people.find((p) => p.id === id); }
 
@@ -94,8 +97,7 @@ export class GreenroomStore extends EventEmitter {
   }
 
   deletePhoto(file) {
-    const full = path.join(this.uploads, path.basename(file));
-    fs.rm(full, { force: true }, () => {});
+    this.docs.removeFile(this.photoKey(file)).catch((e) => console.error(`[store] couldn't delete a photo: ${e.message}`));
   }
 
   assign(micId, { personId, status, note }) {
