@@ -34,23 +34,24 @@ export function checkPin(expected, given) {
  * settings) stops this and starts a new one. Emits 'message' for the browser.
  */
 export class Runtime extends EventEmitter {
-  constructor({ orgId, dir, settings, accounts = () => false }) {
+  /** place: where this organization's things are saved ({ docs, prefix }, or a data folder). */
+  constructor({ orgId, place, settings, accounts = () => false }) {
     super();
     this.orgId = orgId;
     this.settings = settings;
     this.hub = new Hub();
-    this.store = new GreenroomStore(dir);
-    this.board = new Board(dir);
-    this.dashboards = new Dashboards(dir, defaultDashboards(settings));
+    this.store = new GreenroomStore(place);
+    this.board = new Board(place);
+    this.dashboards = new Dashboards(place, defaultDashboards(settings));
     this.service = new ServiceManager({
-      dataDir: dir,
+      dataDir: place,
       pco: settings.planningCenter ? new PlanningCenter(settings.planningCenter) : null,
       cfg: settings.service,
     });
     // Once accounts exist the PIN no longer opens anything; signed-in roles do instead.
-    this.comms = new Comms(dir, { checkPin: (pin) => !accounts() && checkPin(settings.security.adminPin, pin), orgName: settings.org.name });
+    this.comms = new Comms(place, { checkPin: (pin) => !accounts() && checkPin(settings.security.adminPin, pin), orgName: settings.org.name });
     this.streams = new Streams(settings.streams || [], this.hub);
-    this.schedule = new Schedule(dir);
+    this.schedule = new Schedule(place);
     this.alerts = [];
     this.buildDevices();
   }
@@ -248,7 +249,7 @@ export class Runtime extends EventEmitter {
     this.comms.stop();
     this.streams.stop();
     this.hub.stop();
-    for (const e of [this.store, this.board, this.dashboards, this.schedule]) e.removeAllListeners();
+    for (const e of [this.store, this.board, this.dashboards, this.schedule]) { e.close(); e.removeAllListeners(); }
     this.removeAllListeners();
   }
 

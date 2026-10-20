@@ -85,7 +85,7 @@ export class System {
   /** Restart (only as the background service, which starts it again). */
   restartSoon() {
     if (!this.asService) return false;
-    setTimeout(() => process.exit(0), 800);
+    setTimeout(() => process.kill(process.pid, 'SIGTERM'), 800); // saves everything, then exits
     return true;
   }
 }

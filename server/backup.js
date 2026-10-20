@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 
@@ -15,28 +13,26 @@ import crypto from 'node:crypto';
 const MAGIC = Buffer.from('WAVSENC1');
 const FORMAT = 'wavs-backup';
 
-function listFiles(dir, base = dir) {
-  const out = [];
-  for (const it of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, it.name);
-    if (it.isDirectory()) out.push(...listFiles(p, base));
-    else if (!it.name.endsWith('.tmp')) out.push(path.relative(base, p).split(path.sep).join('/'));
-  }
-  return out;
-}
-
 const keyFrom = (password, salt) => crypto.scryptSync(String(password), salt, 32, { N: 16384, r: 8, p: 1 });
 
 /** Build a backup file for the given organizations. */
-export function createBackup({ orgs, auth, orgIds, password = '' }) {
-  const list = orgIds.map((id) => {
+export async function createBackup({ orgs, auth, orgIds, password = '' }) {
+  const list = [];
+  for (const id of orgIds) {
     const entry = orgs.data.orgs.find((o) => o.id === id);
     if (!entry) throw new Error(`Unknown organization ${id}`);
-    const dir = orgs.dir(id);
+    const prefix = orgs.prefix(id);
     const files = {};
-    if (fs.existsSync(dir)) for (const rel of listFiles(dir)) files[rel] = fs.readFileSync(path.join(dir, rel)).toString('base64');
-    return { id, name: entry.name, files };
-  });
+    for (const key of orgs.docs.list(prefix)) {
+      const rel = key.slice(prefix.length);
+      if (rel.endsWith('.json')) files[rel] = Buffer.from(JSON.stringify(orgs.docs.get(key), null, 2)).toString('base64');
+      else {
+        const f = await orgs.docs.getFile(key);
+        if (f) files[rel] = f.data.toString('base64');
+      }
+    }
+    list.push({ id, name: entry.name, files });
+  }
   const users = auth.data.users
     .filter((u) => u.owner || orgIds.some((id) => u.roles?.[id]))
     .map(({ id, name, username, pass, owner, roles, createdAt }) => ({
@@ -83,7 +79,7 @@ export function readBackup(buf, password = '') {
  * choices: { [orgIdInBackup]: 'new' | 'replace' | 'skip' }   ('replace' only if it exists here)
  * Returns { imported: [{ from, id, name, mode }], users: { added, updated } }
  */
-export function importBackup({ data, orgs, auth, choices = {} }) {
+export async function importBackup({ data, orgs, auth, choices = {} }) {
   const imported = [];
   const idMap = {};
   for (const o of data.orgs) {
@@ -97,13 +93,17 @@ export function importBackup({ data, orgs, auth, choices = {} }) {
     } else if (!orgs.data.orgs.some((x) => x.id === id)) {
       throw new Error(`${o.name} doesn't exist on this computer, so it can't be replaced`);
     }
-    const dir = orgs.dir(id);
-    fs.rmSync(dir, { recursive: true, force: true });
+    const prefix = orgs.prefix(id);
+    await orgs.docs.remove(`orgs/${id}`);
     for (const [rel, b64] of Object.entries(o.files)) {
-      const target = path.resolve(dir, rel);
-      if (!target.startsWith(path.resolve(dir) + path.sep)) continue; // never write outside the org folder
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, Buffer.from(b64, 'base64'));
+      // Never write outside the organization's place.
+      if (!/^[\w.-]+(\/[\w.-]+)*$/.test(rel) || rel.split('/').some((p) => p === '..' || p === '.')) continue;
+      const buf = Buffer.from(b64, 'base64');
+      if (rel.endsWith('.json')) {
+        let v;
+        try { v = JSON.parse(buf.toString('utf8')); } catch { continue; }
+        orgs.docs.put(`${prefix}${rel}`, v);
+      } else await orgs.docs.putFile(`${prefix}${rel}`, buf);
     }
     const entry = orgs.data.orgs.find((x) => x.id === id);
     try { entry.name = orgs.read(id).org.name || o.name; } catch { entry.name = o.name; }

@@ -1,5 +1,5 @@
 // Settings for the active organization: branding, PIN, Planning Center, alerts, organizations.
-import { start, store, esc, api, toast, icon, confirmBox, askText } from './common.js';
+import { start, store, esc, api, toast, icon, confirmBox, askText, ask } from './common.js';
 import { deviceForm, readForm, runTest } from './forms.js';
 
 await start({ page: 'settings' });
@@ -239,6 +239,7 @@ let upd = null;
 
 async function drawComputer() {
   try { sys = await api('GET', '/api/system'); } catch (err) { comp.innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
+  try { db = await api('GET', '/api/system/database'); } catch { db = null; }
   const svc = sys.service;
   const mac = svc.platform === 'darwin';
   comp.innerHTML = `
@@ -259,14 +260,135 @@ async function drawComputer() {
         <div>${sys.commit ? `<span class="mono">${esc(sys.commit)}</span> · ${esc(sys.date)}` : esc(sys.version)}</div></div>
     </div>
     <div class="sys-offsite" id="offsite">${offsiteBlock()}</div>
+    <div class="sys-cloud" id="cloud-db">${cloudBlock()}</div>
     <div class="sys-update">
       ${!sys.git ? `<p class="muted small">This copy was downloaded as a ZIP, so it can't update itself. Install it with git (see the README) to get the <b>Update now</b> button.</p>`
         : `<div class="row-btns"><button class="btn" id="check-upd" type="button">Check for updates</button>
             ${upd?.behind ? `<button class="btn primary" id="do-upd" type="button">Update now (${upd.behind} change${upd.behind > 1 ? 's' : ''})</button>` : ''}</div>
           <div id="upd-out" class="small">${updText()}</div>`}
     </div>
-    <p class="muted small">Your setup is saved in <span class="mono">${esc(sys.dataDir)}</span>. Updating never touches it.</p>`;
+    <p class="muted small">${sys.storage?.kind === 'mongodb' ? 'This computer\'s own files (and its copy of the cloud database) are' : 'Your setup is saved'} in <span class="mono">${esc(sys.dataDir)}</span>. Updating never touches it.</p>`;
 }
+
+// ---- where everything is saved: this computer, or a cloud database (MongoDB Atlas)
+let db = null;
+let dbTest = null; // { uri, result } after "Test"
+let dbBusy = '';
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const copiedText = (c) => `Copied ${plural(c.docs, 'document', 'documents')} and ${plural(c.files, 'photo or logo', 'photos and logos')}`;
+
+function cloudBlock() {
+  if (!db) return '';
+  const cloud = db.kind === 'mongodb';
+  const chip = cloud
+    ? `<span class="chip ${db.offline || db.error ? 'bad' : 'good'}">${db.offline ? 'Offline: using the copy here' : db.error ? 'Problem' : 'Cloud database'}</span>`
+    : '<span class="chip">This computer</span>';
+  const where = cloud
+    ? `<div>Saved in MongoDB at <span class="mono">${esc(db.where)}</span> (database <span class="mono">${esc(db.db)}</span>). This computer keeps a copy, so a service still runs if the internet drops; changes made meanwhile are sent when it's back.${db.pending ? ` <b>${db.pending} change${db.pending > 1 ? 's' : ''} waiting to be sent.</b>` : ''}</div>`
+    : '<div class="small muted">People, photos, dashboards, schedules, comms and accounts are saved in this computer\'s data folder. Connect a cloud database to keep them online instead: any host computer (and the website, coming next) can then use the same setup, and nothing is lost if this computer dies.</div>';
+  const t = dbTest?.result;
+  const tested = t ? `<div class="test-result ok small">✓ Connected to <span class="mono">${esc(t.host)}</span> (database <span class="mono">${esc(t.db)}</span>).
+      ${t.orgs.length ? `It already holds: <b>${t.orgs.map(esc).join(', ')}</b>.` : t.empty ? 'It\'s empty.' : 'It has data, but no organizations.'}</div>
+    <div class="row-btns">
+      <button class="btn small primary" type="button" data-db-switch="upload" ${dbBusy ? 'disabled' : ''}>Move this computer's setup there</button>
+      ${t.orgs.length ? `<button class="btn small" type="button" data-db-switch="use" ${dbBusy ? 'disabled' : ''}>Use what's there instead</button>` : ''}
+    </div>` : '';
+  // Switched, but this copy was started from Terminal and hasn't restarted yet.
+  const pending = db.configured !== cloud && !db.problem && !db.fromEnv
+    ? `<small class="warn-text">Restart the dashboard to finish: ${db.configured ? 'it starts using the cloud database' : 'it goes back to this computer\'s folder'} then. Until then, changes go to the old place.</small>` : '';
+  return `<div class="off-head"><b>Where everything is saved</b> ${chip}</div>
+    ${where}${pending}
+    ${db.problem ? `<small class="over">${esc(db.problem)}</small>` : db.error && !db.offline ? `<small class="over">${esc(db.error)}</small>` : ''}
+    ${db.fromEnv ? '<small class="muted">Set by <span class="mono">MONGODB_URI</span> on this computer; change it there.</small>'
+      : cloud && !db.configured ? ''
+      : db.configured ? `<div class="row-btns"><button class="btn small" type="button" data-db-off ${dbBusy ? 'disabled' : ''}>Stop using the cloud database…</button></div>`
+      : `<details class="off-own" ${dbTest ? 'open' : ''}><summary>Connect a cloud database (MongoDB Atlas, free)</summary>
+      <form class="form" id="db-form">
+        <ol class="small muted db-steps">
+          <li>Make a free account at <a href="https://www.mongodb.com/cloud/atlas/register" target="_blank" rel="noopener">mongodb.com/atlas</a> and create a <b>free cluster</b>.</li>
+          <li><b>Database Access</b>: add a database user with a password.</li>
+          <li><b>Network Access</b>: add <span class="mono">0.0.0.0/0</span> (anywhere), or this building's internet address.</li>
+          <li><b>Connect → Drivers</b>: copy the connection string and put your password in it.</li>
+        </ol>
+        <label class="f"><span>Connection string</span><input type="password" name="uri" value="${esc(dbTest?.uri || '')}" placeholder="mongodb+srv://user:password@cluster0.xxxxx.mongodb.net/" autocomplete="off" spellcheck="false"></label>
+        <div class="row-btns"><button class="btn small" ${dbBusy ? 'disabled' : ''}>${dbBusy === 'test' ? 'Testing…' : 'Test'}</button></div>
+        ${tested}
+        ${dbBusy && dbBusy !== 'test' ? `<small class="muted">${esc(dbBusy)}</small>` : ''}
+        <small class="muted">Only the owner can change this. The connection string is saved on this computer only.</small>
+      </form></details>`}`;
+}
+
+function redrawCloud() {
+  const el = document.getElementById('cloud-db');
+  if (el) el.innerHTML = cloudBlock();
+}
+
+/** The dashboard restarts with the new storage: wait for it, then reload. */
+async function afterSwitch(r, what) {
+  if (!r.restarting) {
+    dbBusy = '';
+    await confirmBox(`${what} Restart the dashboard to finish: close Terminal and start it again (or restart this computer).`, { title: 'Almost done', ok: 'OK', danger: false });
+    drawComputer();
+    return;
+  }
+  store.holdReload = true;
+  dbBusy = 'Restarting…';
+  redrawCloud();
+  await new Promise((r2) => setTimeout(r2, 2500));
+  for (let i = 0; i < 60; i++) {
+    try { if ((await fetch('/api/auth/status', { cache: 'no-store' })).ok) { location.reload(); return; } } catch { /* still restarting */ }
+    await new Promise((r2) => setTimeout(r2, 1000));
+  }
+  toast('It is taking longer than expected. Reload this page in a minute.', true);
+}
+
+comp.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'db-form') return;
+  e.preventDefault();
+  const uri = new FormData(e.target).get('uri').trim();
+  if (!uri) return toast('Paste the connection string first', true);
+  dbBusy = 'test';
+  dbTest = { uri, result: null };
+  redrawCloud();
+  try { dbTest.result = await api('POST', '/api/system/database/test', { uri }); } catch (err) { toast(err.message, true); }
+  dbBusy = '';
+  redrawCloud();
+});
+comp.addEventListener('click', async (e) => {
+  const sw = e.target.closest('[data-db-switch]');
+  if (sw && dbTest?.result) {
+    const t = dbTest.result;
+    const up = sw.dataset.dbSwitch === 'upload';
+    const msg = up
+      ? `Copy ${t.here.length ? t.here.join(', ') : 'this computer\'s setup'} (people, photos, dashboards, schedules, comms and accounts) to the cloud database and save there from now on?${t.orgs.length || !t.empty ? `\n\nWhat's in that database now${t.orgs.length ? ` (${t.orgs.join(', ')})` : ''} is replaced.` : ''}\n\nThe dashboard restarts (about 10 seconds). Avoid doing this during a live event.`
+      : `Use the setup that's in the cloud database (${t.orgs.join(', ')}) from now on? This computer's own setup stays in its folder, unused.\n\nThe dashboard restarts (about 10 seconds).`;
+    if (!await confirmBox(msg, { title: up ? 'Move to the cloud database' : 'Use the cloud database', ok: up ? 'Move it' : 'Use it', danger: !up || t.orgs.length > 0 })) return;
+    dbBusy = up ? 'Copying everything to the cloud database…' : 'Switching…';
+    redrawCloud();
+    try {
+      const r = await api('POST', '/api/system/database', { uri: dbTest.uri, mode: up ? 'upload' : 'use' });
+      dbTest = null;
+      await afterSwitch(r, up ? `${copiedText(r.copied)}.` : 'Switched to the cloud database.');
+    } catch (err) { dbBusy = ''; toast(err.message, true); redrawCloud(); }
+    return;
+  }
+  if (e.target.closest('[data-db-off]')) {
+    const r = await ask({
+      title: 'Stop using the cloud database',
+      message: 'This computer goes back to saving everything in its own folder. The cloud database keeps its copy.',
+      fields: [{ name: 'copy', label: 'This computer starts with', type: 'select', value: 'yes', options: [['yes', 'A copy of the cloud database as it is now (recommended)'], ['no', 'What it had before it was connected']] }],
+      ok: 'Stop using it',
+      danger: true,
+    });
+    if (!r) return;
+    dbBusy = 'Switching…';
+    redrawCloud();
+    try {
+      const out = await api('DELETE', '/api/system/database', { copyBack: r.copy === 'yes' });
+      await afterSwitch(out, out.copied ? `${copiedText(out.copied)} to this computer.` : 'Back to this computer\'s own folder.');
+    } catch (err) { dbBusy = ''; toast(err.message, true); redrawCloud(); }
+  }
+});
 
 // ---- use from anywhere (mobile data): the Cloudflare link
 let remote = null;

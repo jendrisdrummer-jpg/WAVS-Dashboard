@@ -1,7 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { place } from './docs.js';
 
 /**
  * Services planned ahead: a conference's sessions (grouped as an "event"), next month's Sundays,
@@ -45,23 +44,20 @@ function cleanMics(m = {}) {
 }
 
 export class Schedule extends EventEmitter {
-  constructor(dataDir) {
+  constructor(target) {
     super();
-    this.file = path.join(dataDir, 'schedule.json');
-    this.data = { services: [], events: [], templates: [], liveId: null, auto: true, leadMinutes: 90 };
-    if (fs.existsSync(this.file)) {
-      try { this.data = { ...this.data, ...JSON.parse(fs.readFileSync(this.file, 'utf8')) }; } catch (e) {
-        console.error(`[schedule] could not read ${this.file}: ${e.message}`);
-      }
-    }
+    ({ docs: this.docs, key: this.key } = place(target, 'schedule.json'));
+    const initial = { services: [], events: [], templates: [], liveId: null, auto: true, leadMinutes: 90 };
+    this.data = { ...initial, ...(this.docs.get(this.key) || {}) };
+    this.unwatch = this.docs.watch(this.key, (d) => { this.data = { ...initial, ...(d || {}) }; this.emit('change', this.view()); });
   }
 
   save() {
-    const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    fs.renameSync(tmp, this.file);
+    this.docs.put(this.key, this.data);
     this.emit('change', this.view());
   }
+
+  close() { this.unwatch(); }
 
   view() {
     const services = [...this.data.services].sort((a, b) => a.start.localeCompare(b.start));

@@ -1,7 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { place } from './docs.js';
 
 /**
  * Comms (intercom) coordination for one organization.
@@ -49,17 +48,22 @@ const slug = (s) => str(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-
 
 export class Comms extends EventEmitter {
   /** checkPin(pin) -> boolean: the organization's admin PIN (true when none is set). */
-  constructor(dir, { checkPin, orgName }) {
+  constructor(target, { checkPin, orgName }) {
     super();
-    this.file = path.join(dir, 'comms.json');
+    ({ docs: this.docs, key: this.key } = place(target, 'comms.json'));
     this.checkPin = checkPin;
     this.orgName = orgName;
     // access.rosterOnly: only people added in advance can sign in.
     // access.teamPassword: one password for the whole team (hashed).
     this.data = { channels: DEFAULT_CHANNELS, positions: DEFAULT_POSITIONS, members: [], ports: [], access: { rosterOnly: false, teamPassword: null } };
-    if (fs.existsSync(this.file)) {
-      try { this.data = { ...this.data, ...JSON.parse(fs.readFileSync(this.file, 'utf8')) }; } catch (e) { console.error(`[comms] ${e.message}`); }
-    }
+    const initial = this.data;
+    this.data = { ...initial, ...(this.docs.get(this.key) || {}) };
+    // Roster or channels changed on another computer (or the website).
+    this.unwatch = this.docs.watch(this.key, (d) => {
+      if (this.saveTimer) return; // ours is about to be saved
+      this.data = { ...initial, ...(d || {}) };
+      this.changed();
+    });
     this.sockets = new Set();
     this.engine = null;
     this.talking = {}; // memberId -> { channelId: true }
@@ -73,8 +77,7 @@ export class Comms extends EventEmitter {
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
-      fs.writeFileSync(`${this.file}.tmp`, JSON.stringify(this.data, null, 2));
-      fs.renameSync(`${this.file}.tmp`, this.file);
+      this.docs.put(this.key, this.data);
     }, 200);
   }
 
@@ -449,7 +452,8 @@ export class Comms extends EventEmitter {
 
   stop() {
     clearTimeout(this.pending);
-    if (this.saveTimer) { clearTimeout(this.saveTimer); fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2)); }
+    this.unwatch();
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; this.docs.put(this.key, this.data); }
     for (const ws of this.sockets) { this.send(ws, { t: 'reload' }); ws.close(); }
     this.sockets.clear();
     this.removeAllListeners();

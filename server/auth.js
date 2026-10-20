@@ -1,6 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
+import { place } from './docs.js';
 
 /**
  * Accounts for the dashboard. They belong to this computer and each account has a role per
@@ -42,27 +41,39 @@ function validPassword(pw) {
 }
 
 export class Auth {
-  constructor(dataDir) {
-    this.file = path.join(dataDir, 'users.json');
-    this.sessionsFile = path.join(dataDir, 'sessions.json');
-    this.data = { users: [], invites: [], requireLogin: false };
-    this.sessions = {};
-    try { this.data = { ...this.data, ...JSON.parse(fs.readFileSync(this.file, 'utf8')) }; } catch { /* no accounts yet */ }
-    try { this.sessions = JSON.parse(fs.readFileSync(this.sessionsFile, 'utf8')); } catch { /* none */ }
+  /** target: a data folder, or { docs } (see docs.js). */
+  constructor(target) {
+    ({ docs: this.docs, key: this.key } = place(target, 'users.json'));
+    this.sessionsKey = this.key.replace(/users\.json$/, 'sessions.json');
+    const initial = { users: [], invites: [], requireLogin: false };
+    this.data = { ...initial, ...(this.docs.get(this.key) || {}) };
+    this.sessions = this.docs.get(this.sessionsKey) || {};
     this.failures = new Map();
+    // Accounts changed on another computer (or the website).
+    this.unwatch = [
+      this.docs.watch(this.key, (d) => { this.data = { ...initial, ...(d || {}) }; }),
+      this.docs.watch(this.sessionsKey, (d) => { if (!this.sessTimer) this.sessions = d || {}; }),
+    ];
   }
 
   save() {
-    fs.writeFileSync(`${this.file}.tmp`, JSON.stringify(this.data, null, 2), { mode: 0o600 });
-    fs.renameSync(`${this.file}.tmp`, this.file);
+    this.docs.put(this.key, this.data, { secret: true });
   }
 
   saveSessions() {
     clearTimeout(this.sessTimer);
     this.sessTimer = setTimeout(() => {
-      fs.writeFileSync(`${this.sessionsFile}.tmp`, JSON.stringify(this.sessions), { mode: 0o600 });
-      fs.renameSync(`${this.sessionsFile}.tmp`, this.sessionsFile);
+      this.sessTimer = null;
+      this.docs.put(this.sessionsKey, this.sessions, { secret: true });
     }, 500);
+  }
+
+  /** Save sessions now (shutting down). */
+  flush() {
+    if (!this.sessTimer) return;
+    clearTimeout(this.sessTimer);
+    this.sessTimer = null;
+    this.docs.put(this.sessionsKey, this.sessions, { secret: true });
   }
 
   get enabled() { return this.data.users.length > 0; }

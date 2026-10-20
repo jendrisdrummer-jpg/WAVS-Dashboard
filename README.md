@@ -461,7 +461,9 @@ The full list of technologies (server, browser, comms, storage, how it runs) is 
   10 times per second.
 - `public/`: plain HTML, CSS and JS modules with no build step.
 - **Your data** (everything you create, as plain JSON) is kept outside the code folder, so updating,
-  re-downloading or re-cloning the dashboard never loses it:
+  re-downloading or re-cloning the dashboard never loses it. Or it's kept in a cloud database (see
+  **Cloud database** under Running it permanently), through the same storage layer (`server/docs.js`).
+  The data folder:
   - macOS: `~/Library/Application Support/WAVS Dashboard`
   - Windows: `%APPDATA%\WAVS Dashboard`
   - Linux: `~/.wavs-dashboard`
@@ -478,7 +480,11 @@ The full list of technologies (server, browser, comms, storage, how it runs) is 
   starts, the gear and branding from an existing `config.yaml` are imported into the first
   organization, along with existing people and dashboards.
 - `npm test`: tests for the Shure (SLX-D/ULX-D/AD) and vMix parsers, alert rules, plan parsing,
-  ProPresenter auto-tracking, organizations and settings validation.
+  ProPresenter auto-tracking, organizations, settings validation and storage. The MongoDB storage
+  tests run when `WAVS_TEST_MONGODB` points at a test server that's a replica set, e.g.
+  `docker run -d -p 27017:27017 mongo:7 --replSet rs0` then
+  `docker exec <id> mongosh --eval 'rs.initiate()'`, then
+  `WAVS_TEST_MONGODB='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' npm test`.
 
 ## Accounts and sign-in
 
@@ -527,7 +533,26 @@ While the service is running, `npm start` reports that the dashboard is already 
   2. Add a public hostname, such as `dashboard.yourchurch.org`, pointing to `http://localhost:8090`.
   3. In Settings, open **Use your own address** and enter the address and the token.
 
-**Several host computers.** Any number of computers can host at the same time, for example your Mac for WAVS events and the church's computer for Sunday services. Each one runs its own organizations, accounts and comms. Give each computer its own name in **Settings → This computer** (e.g. `wavs` and `grace`), so they become `http://wavs.local` and `http://grace.local`. If another device already uses the name, Settings warns you. One organization runs live on one host at a time; changes don't sync between hosts.
+**Several host computers.** Any number of computers can host at the same time, for example your Mac for WAVS events and the church's computer for Sunday services. Give each computer its own name in **Settings → This computer** (e.g. `wavs` and `grace`), so they become `http://wavs.local` and `http://grace.local`. If another device already uses the name, Settings warns you.
+- Each computer saving in its own folder runs its own organizations, accounts and comms; changes don't sync between them.
+- Computers connected to the same **cloud database** (below) share everything. Each one still picks its own active organization. Run each organization live on one computer at a time: two computers driving the same organization would overwrite each other's live changes.
+
+**Cloud database (MongoDB Atlas).** By default everything is saved in this computer's data folder. To keep it online instead, open **Settings → This computer → Where everything is saved → Connect a cloud database**:
+1. Make a free account at [mongodb.com/atlas](https://www.mongodb.com/cloud/atlas/register) and create a **free cluster**.
+2. **Database Access**: add a database user with a password.
+3. **Network Access**: add `0.0.0.0/0` (anywhere), or the building's internet address.
+4. **Connect → Drivers**: copy the connection string, put the password in it, paste it into Settings and click **Test**.
+5. Click **Move this computer's setup there** (or **Use what's there instead**, on a second computer). The dashboard restarts and saves to the cloud from then on.
+
+The result:
+- People, photos, logos, dashboards, notes, schedules, plans, comms and accounts all live in the database (a database called `wavs`, unless the connection string names one). The website version, coming next, uses it too.
+- This computer keeps a copy (`cloud-copy/` in the data folder). If the internet drops, the dashboard keeps running and even starts from that copy; changes made meanwhile are sent when it's back.
+- Changes made on another computer show up here within a second or two.
+- The certificate, Cloudflare connector, logs, computer name and active organization stay on each computer.
+- Only the owner can switch. **Stop using the cloud database** goes back to the folder, starting from a copy of the cloud's current setup (or from what the folder had before).
+- Developers can set `MONGODB_URI` instead, which overrides Settings.
+- Atlas's free tier (512 MB) holds thousands of photos. Each photo or logo can be up to 15 MB.
+- Not running as the background service? Restart the dashboard by hand after switching.
 
 **Moving an organization to another computer.** In **Settings → Move to another computer**:
 1. On the old host, tick the organizations to move, optionally set a password, and click **Download backup**. You get a `.wavsbackup` file.
