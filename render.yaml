@@ -1,0 +1,19 @@
+# Render Blueprint: the WAVS Dashboard website (see docs/HOSTING.md).
+# Render → New → Blueprint → pick this repository. It asks for the two values marked sync: false.
+services:
+  - type: web
+    name: wavs-dashboard
+    runtime: node
+    plan: free # sleeps after 15 minutes without visitors; "starter" ($7/month) stays on
+    buildCommand: npm ci --omit=dev
+    startCommand: node server/index.js
+    healthCheckPath: /api/auth/status
+    envVars:
+      - key: WAVS_HOSTED
+        value: "1"
+      - key: NODE_VERSION
+        value: "22"
+      - key: MONGODB_URI # MongoDB Atlas connection string (with the password in it)
+        sync: false
+      - key: WAVS_OWNER_EMAIL # your email: signing up with it makes you the site owner
+        sync: false

@@ -10,7 +10,7 @@ let asLead = false; // leads can run comms but not change sign-in rules or choos
 let levels = {};
 
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/comms-ws${location.search.match(/[?&]org=[^&]+/) ? `?${location.search.match(/org=[^&]+/)[0]}` : ''}`);
   ws.onopen = () => hello();
   ws.onclose = () => setTimeout(connect, 1500);
   ws.onmessage = async (ev) => {
@@ -69,7 +69,7 @@ function renderJoin() {
   setHTML($('join'), `
     <div class="cc-tabs" role="tablist">
       <button role="tab" class="${tab === 'anywhere' ? 'on' : ''}" data-tab="anywhere" ${anywhere ? '' : 'disabled'}>Anywhere${anywhere ? '' : ' (off)'}</button>
-      <button role="tab" class="${tab === 'wifi' ? 'on' : ''}" data-tab="wifi">Same Wi-Fi</button>
+      ${info.hosted ? '' : `<button role="tab" class="${tab === 'wifi' ? 'on' : ''}" data-tab="wifi">Same Wi-Fi</button>`}
     </div>
     <div class="cc-joinrow">
       <img class="cc-qr" src="/api/comms/qr.svg?url=${encodeURIComponent(url)}" alt="QR code to join comms">
@@ -81,19 +81,20 @@ function renderJoin() {
           : 'Phone must be on the same Wi-Fi. The first time, it warns the connection isn\'t private: tap <b>Show Details → visit this website</b> (iPhone) or <b>Advanced → Proceed</b> (Android).'}</p>
       </div>
     </div>
-    <div class="cc-offsite">
+    ${info.hosted ? '' : `<div class="cc-offsite">
       <div><b>Off-site access</b> <span class="chip ${rm.status === 'on' ? 'good' : rm.status === 'error' ? 'bad' : ''}">${rm.enabled ? (rm.status === 'on' ? 'On' : rm.status === 'error' ? 'Problem' : 'Starting') : 'Off'}</span>
         <button class="btn small ${rm.enabled ? '' : 'primary'}" id="offsite-toggle" type="button">${rm.enabled ? 'Turn off' : 'Turn on'}</button></div>
       <small class="muted">${statusText}</small>
       ${rm.enabled && open ? '<small class="warn-text">⚠ Anyone with the link can join. Set a team password or turn on "Only people on the list" under Sign-in rules.</small>' : ''}
-    </div>
-    <details class="cc-help"><summary>Phone can't open it?</summary><ol class="small">
+    </div>`}
+    ${info.hosted && open ? '<small class="warn-text">⚠ Anyone with the link can join. Set a team password or turn on "Only people on the list" under Sign-in rules.</small>' : ''}
+    ${info.hosted ? '' : `<details class="cc-help"><summary>Phone can't open it?</summary><ol class="small">
       <li>Easiest fix: turn on <b>Off-site access</b> and use the <b>Anywhere</b> code. It works even when the Wi-Fi blocks devices from reaching each other.</li>
       <li>Same Wi-Fi: make sure the phone isn't on a <b>guest</b> network or cellular. Guest Wi-Fi usually blocks devices from reaching each other.</li>
       <li>Try the other addresses in the list above (the one marked ✓ is the most likely).</li>
       <li>On this Mac: System Settings → Network → <b>Firewall</b> → Options → allow <b>node</b> to accept incoming connections.</li>
       <li>Test: on the phone, open <span class="mono">${esc(info.httpUrl || 'http://<this computer>:8080')}</span>. If that doesn't load either, the network or firewall is blocking it.</li>
-    </ol></details>`);
+    </ol></details>`}`);
 }
 $('join').addEventListener('click', async (e) => {
   const t = e.target.closest('[data-tab]');

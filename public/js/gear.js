@@ -4,6 +4,14 @@ import { deviceForm, enhanceForm, readForm, runTest, KIND_LABEL } from './forms.
 
 await start({ page: 'gear' });
 
+// The website can't reach gear on a venue's network yet (the venue computer will connect it).
+if (store.config.hosted) {
+  const n = document.createElement('div');
+  n.className = 'hosted-note';
+  n.innerHTML = '<b>On the website, gear connects through a computer at your venue.</b> That small program is coming in the next update. Until then you can add your gear here (it waits for that computer), and use <b>demo</b> gear to try out the dashboards.';
+  document.querySelector('main').prepend(n);
+}
+
 let settings = await api('GET', '/api/settings');
 const results = {}; // "kind-index" -> last Test result, kept across re-renders
 

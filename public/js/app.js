@@ -327,7 +327,7 @@ function renderHeader() {
   const on = (id, fn) => { const el = slotRight.querySelector(`#${id}`); if (el) el.onclick = fn; };
   on('edit', () => setEditing(true));
   on('tvlink', async () => {
-    const url = `${store.config.tvBase}/tv/${encodeURIComponent(store.config.orgId)}/${encodeURIComponent(current.id)}`;
+    const url = `${store.config.tvBase}/tv/${encodeURIComponent(store.config.orgId)}/${encodeURIComponent(current.id)}${store.config.tvQuery || ''}`;
     try { await navigator.clipboard.writeText(url); toast(`TV link for “${current.name}” copied. Paste it into AbleSign (or the TV's browser).`); } catch { await askText(`TV link for “${current.name}”`, url); }
   });
   on('kiosk', () => { const u = new URL(location.href); u.searchParams.set('kiosk', '1'); location.href = u; });

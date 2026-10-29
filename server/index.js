@@ -21,13 +21,18 @@ import { localName, startLocalName, setLocalName, stopLocalName, listenPort80 } 
 import { createBackup, readBackup, importBackup, isEncrypted } from './backup.js';
 import { openDocs, FileDocs, MongoDocs, databaseConfig, saveDatabaseConfig, copyAll, hasSetup, mongoHost } from './docs.js';
 import { System } from './system.js';
+import { Site } from './site.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
 // Planning Center) is per organization and edited in the browser. On first run the
 // organization is created from config.yaml, so existing setups carry over.
 const cfg = loadConfig();
+// WAVS_HOSTED=1: the website (e.g. on Render). Anyone can sign up and get their own
+// organization; every organization runs at the same time; nothing reaches a local network.
+// Otherwise: one host computer at a venue, running one organization at a time.
+const HOSTED = process.env.WAVS_HOSTED === '1';
 const dataDir = dataDirFor({ root: ROOT });
-if (!process.env.WAVS_DATA) {
+if (!process.env.WAVS_DATA && !HOSTED) {
   const from = adoptOldData(dataDir, oldDataCandidates({ root: ROOT }));
   if (from) console.log(`[data] copied your existing setup from ${from}`);
 }
@@ -43,8 +48,10 @@ const BOOT = crypto.randomUUID(); // changes on every start, so open screens can
 let docs;
 let storageProblem = null;
 try {
-  docs = await openDocs(dataDir);
+  docs = await openDocs(dataDir, { hosted: HOSTED, dbName: HOSTED ? 'wavs-web' : undefined });
 } catch (e) {
+  // The website never falls back to its temporary disk: stop, and the host starts it again.
+  if (HOSTED) { console.error(`[data] can't open the database: ${e.message}`); process.exit(1); }
   // The cloud database can't be reached and there's no copy here yet: run from this computer's
   // folder so the dashboard still opens, and say so in Settings.
   storageProblem = `Couldn't open the cloud database (${e.message.replace(/\.$/, '')}). Using this computer's own copy until it's fixed; changes made now stay on this computer.`;
@@ -52,47 +59,130 @@ try {
   docs = FileDocs.at(dataDir);
 }
 if (docs.kind === 'mongodb') console.log(`[data] using MongoDB at ${docs.host} (database "${docs.db.databaseName}")`);
+else if (HOSTED) console.warn('[data] WAVS_HOSTED without MONGODB_URI: saving to this server\'s disk (fine for trying it out, lost on most hosts when it restarts)');
 const orgs = new OrgRegistry({ docs }, { local: FileDocs.at(dataDir) });
-await orgs.migrate(cfg);
+if (!HOSTED) await orgs.migrate(cfg);
 const auth = new Auth({ docs });
+const site = new Site({ docs });
 
-let rt = null; // Runtime for the active organization
+// ---------------------------------------------------------------- organizations running
 
-let unwatchSettings = () => {};
-function startRuntime() {
-  const id = orgs.data.active || orgs.data.orgs[0].id;
-  const next = new Runtime({ orgId: id, place: orgs.place(id), settings: orgs.read(id), accounts: () => auth.enabled });
-  next.on('message', broadcast);
+// One Runtime per running organization. A host computer runs its active one; the website runs
+// each organization while people use it (started on first use).
+const runtimes = new Map(); // orgId -> Runtime
+
+function startRuntime(id) {
+  const next = new Runtime({ orgId: id, place: orgs.place(id), settings: orgs.read(id), accounts: () => accountsOn(), cloud: HOSTED });
+  next.on('message', (msg) => broadcastTo(id, msg));
   next.start();
-  rt = next;
+  next.lastUsed = Date.now();
   // Gear or branding changed on another computer (or the website): start again with it.
-  unwatchSettings();
-  unwatchSettings = orgs.watchSettings(id, () => { console.log('[orgs] settings changed elsewhere; reconnecting'); restartRuntime(); });
-  console.log(`[orgs] active organization: ${rt.settings.org.name}`);
+  next.unwatchSettings = orgs.watchSettings(id, () => { console.log(`[orgs] ${id}: settings changed elsewhere; reconnecting`); restartRuntime(id); });
+  runtimes.set(id, next);
+  console.log(`[orgs] running: ${next.settings.org.name}`);
+  return next;
 }
 
-/** Stop the current organization's gear and start again (after a switch or a gear change). */
-function restartRuntime() {
-  rt?.stop();
-  startRuntime();
-  broadcast({ type: 'reload' });
+function stopRuntime(id) {
+  const old = runtimes.get(id);
+  if (!old) return;
+  old.unwatchSettings();
+  old.stop();
+  runtimes.delete(id);
+}
+
+/** The running organization (started if needed), or null if it doesn't exist. */
+function runtimeFor(id) {
+  if (!id || !orgs.data.orgs.some((o) => o.id === id)) return null;
+  const r = runtimes.get(id) || startRuntime(id);
+  r.lastUsed = Date.now();
+  return r;
+}
+
+/** Stop an organization's gear and start again (after a gear or settings change). */
+function restartRuntime(id) {
+  stopRuntime(id);
+  const r = runtimeFor(id);
+  broadcastTo(id, { type: 'reload' });
+  return r;
+}
+
+/** Host computer: the organization it runs (screens follow it). */
+const activeId = () => (orgs.data.orgs.some((o) => o.id === orgs.data.active) ? orgs.data.active : orgs.data.orgs[0]?.id) || null;
+
+/** Host computer: switch the organization every screen shows. */
+function switchActive(id) {
+  orgs.setActive(id);
+  for (const other of [...runtimes.keys()]) if (other !== id) stopRuntime(other);
+  runtimeFor(id);
+  broadcastAll({ type: 'reload' });
+}
+
+// Accounts are always on for the website; on a host computer once the first one exists.
+const accountsOn = () => HOSTED || auth.enabled;
+const loginRequired = () => HOSTED || Boolean(auth.data.requireLogin);
+const myOrgs = (user) => orgs.data.orgs.filter((o) => (HOSTED ? auth.rank(user, o.id) >= 1 && (!user?.owner || auth.memberOf(user, o.id)) : true));
+
+const cookieValue = (req, name) => {
+  const m = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(req.headers.cookie || '');
+  return m ? decodeURIComponent(m[1]) : null;
+};
+
+/**
+ * Which organization a request is for. Host computer: the active one. Website: the one the
+ * person picked (cookie), else their first; a TV link's organization; or, for the comms phone
+ * page, the one in its link (?org=).
+ */
+function orgFor(req, pathname = req.path) {
+  if (!HOSTED) return activeId();
+  const picked = cookieValue(req, 'wavs_org');
+  if (req.user) {
+    if (picked && auth.rank(req.user, picked) >= 1) return picked;
+    return myOrgs(req.user)[0]?.id || null;
+  }
+  const tv = tvViewer(req);
+  if (tv) return tv;
+  const q = new URL(req.url, 'http://x').searchParams.get('org');
+  if (q && /^\/(comms|comms-ws|api\/comms\/(info|qr\.svg))$/.test(pathname)) return q;
+  return null;
+}
+
+/** A TV link's cookie ("<org>.<key>"): that organization's screens, view only. */
+function tvViewer(req) {
+  const v = cookieValue(req, 'wavs_tv');
+  if (!v) return null;
+  const dot = v.lastIndexOf('.');
+  const org = v.slice(0, dot);
+  return org && orgs.tvKeyOk(org, v.slice(dot + 1)) ? org : null;
 }
 
 function publicConfig(req) {
+  const { rt } = req;
+  const user = req.user ? auth.view(req.user, rt?.orgId) : null;
+  const common = {
+    hosted: HOSTED,
+    site: HOSTED ? { name: site.name, owner: Boolean(req.user?.owner), canCreateOrg: Boolean(req.user) } : null,
+    orgs: req.user || !HOSTED ? myOrgs(req.user).map((o) => ({ id: o.id, name: o.name, color: orgs.read(o.id).org.theme.accent })) : [],
+  };
+  // Website, signed in, but not part of any organization yet: the page offers to create one.
+  if (!rt) return { ...common, noOrg: true, auth: { enabled: true, requireLogin: true, user, role: null } };
   const s = rt.settings;
+  const role = accountsOn() ? (req.user ? auth.roleIn(req.user, rt.orgId) : req.tv ? 'viewer' : null) : 'admin';
   return {
+    ...common,
     auth: {
-      enabled: auth.enabled,
-      requireLogin: Boolean(auth.data.requireLogin),
-      user: req.user ? auth.view(req.user, rt.orgId) : null,
-      role: auth.enabled ? auth.roleIn(req.user, rt.orgId) : 'admin',
+      enabled: accountsOn(),
+      requireLogin: loginRequired(),
+      user,
+      role,
     },
     org: { name: s.org.name, serviceName: s.org.serviceName, theme: s.org.theme, logo: Boolean(orgs.logoKey(rt.orgId)) },
     orgId: rt.orgId,
-    orgs: orgs.list(),
     tvBase: tvBase(req),
+    // TV links on the website carry a key, so a TV shows the dashboards without signing in.
+    tvQuery: HOSTED && auth.rank(req.user, rt.orgId) >= RANK.producer ? `?k=${orgs.tvKey(rt.orgId)}` : '',
     setupComplete: s.setupComplete,
-    dataDir,
+    dataDir: HOSTED ? null : dataDir,
     alerts: s.alerts,
     rf: s.rf,
     video: s.video,
@@ -100,7 +190,7 @@ function publicConfig(req) {
     switchers: s.switchers.map((x) => ({ id: x.id, name: x.name, me: x.me || 1 })),
     propresenter: s.propresenter.map((x) => ({ id: x.id, name: x.name })),
     planningCenter: Boolean(s.planningCenter),
-    pinRequired: !auth.enabled && Boolean(s.security.adminPin),
+    pinRequired: !accountsOn() && Boolean(s.security.adminPin),
   };
 }
 
@@ -108,14 +198,21 @@ function publicConfig(req) {
 
 const app = express();
 app.disable('x-powered-by');
+// The website sits behind its host's proxy (https, the visitor's address).
+if (HOSTED) app.set('trust proxy', 1);
 app.use(express.json({ limit: '200kb' }));
 
-const requirePin = (req, res, next) => (checkPin(rt.settings.security.adminPin, req.get('x-admin-pin'))
+const requirePin = (req, res, next) => (checkPin(req.rt?.settings.security.adminPin, req.get('x-admin-pin'))
   ? next()
   : res.status(401).json({ error: 'PIN required' }));
 
-// Who is signed in (session cookie).
-app.use((req, _res, next) => { req.user = auth.session(sessionToken(req)); next(); });
+// Who is signed in (session cookie), and which organization the request is for.
+app.use((req, _res, next) => {
+  req.user = auth.session(sessionToken(req));
+  req.tv = !req.user && HOSTED ? tvViewer(req) : null;
+  req.rt = runtimeFor(orgFor(req));
+  next();
+});
 
 // Off-site (through the Cloudflare link, from any network): everyone signs in, whatever the
 // "require sign-in" setting, and accounts must exist. Only the sign-in pages, static files and
@@ -129,7 +226,7 @@ app.use((req, res, next) => {
     if (req.path === '/') return res.redirect('/comms');
     return res.status(403).send('The dashboard can be opened from anywhere once accounts are set up (Settings → Accounts on the dashboard computer). Comms works now at /comms.');
   }
-  if (req.user && auth.rank(req.user, rt.orgId) >= 1) return next();
+  if (req.user && auth.rank(req.user, req.rt?.orgId) >= 1) return next();
   if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) return res.status(401).json({ error: 'Sign in first', login: true });
   res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
 });
@@ -139,24 +236,39 @@ app.use((req, res, next) => {
  * every change, as before. After that, signed-in roles do: crew < producer < admin.
  */
 const need = (role) => (req, res, next) => {
-  if (!auth.enabled) return role === 'open' ? next() : requirePin(req, res, next);
-  if (role === 'open' && !auth.data.requireLogin) return next();
+  if (!req.rt) return res.status(req.user ? 409 : 401).json(req.user ? { error: 'Create an organization first', noOrg: true } : { error: 'Sign in first', login: true });
+  if (!accountsOn()) return role === 'open' ? next() : requirePin(req, res, next);
+  if (role === 'open' && !loginRequired()) return next();
   if (!req.user) return res.status(401).json({ error: 'Sign in to do that', login: true });
-  const have = auth.rank(req.user, rt.orgId);
+  const have = auth.rank(req.user, req.rt.orgId);
   const want = RANK[role] || 1;
-  if (have < want) return res.status(403).json({ error: have ? `That needs ${role} access. Ask an admin.` : `Your account doesn't have access to ${rt.settings.org.name}. Ask an admin.` });
+  if (have < want) return res.status(403).json({ error: have ? `That needs ${role} access. Ask an admin.` : `Your account doesn't have access to ${req.rt.settings.org.name}. Ask an admin.` });
   next();
 };
 
-// "Require sign-in to view": everything except the sign-in pages, static files and the comms
-// phone page (crew sign in to comms with their name) needs a signed-in account.
-const PUBLIC = /^\/(login|join\/|api\/auth\/|css\/|js\/|vendor\/|logo$|comms$|api\/comms\/qr\.svg)/;
+// "Require sign-in to view" (always on the website): everything except the sign-in pages,
+// static files and the comms phone page (crew sign in to comms with their name) needs a
+// signed-in account. A TV link may look (GET), not change anything.
+const PUBLIC = /^\/(login|join\/|signup$|api\/auth\/|css\/|js\/|vendor\/|logo$|comms$|api\/comms\/qr\.svg$|favicon|tv\/)/;
+const TV_CAN_READ = /^\/(api\/(config|state|dashboards|schedule|service|settings)$|uploads\/|d\/|dashboards$)/;
 app.use((req, res, next) => {
-  if (!auth.enabled || !auth.data.requireLogin || PUBLIC.test(req.path)) return next();
-  if (req.user && auth.rank(req.user, rt.orgId) >= 1) return next();
+  if (!accountsOn() || !loginRequired() || PUBLIC.test(req.path)) return next();
+  if (req.user && (HOSTED || auth.rank(req.user, req.rt?.orgId) >= 1)) return next();
+  if (req.tv && req.method === 'GET' && TV_CAN_READ.test(req.path)) return next();
   if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) return res.status(401).json({ error: 'Sign in first', login: true });
   res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
 });
+
+// Everything else is about one organization: there must be one.
+const NO_ORG_OK = /^\/api\/(config|auth\/|orgs$|site(\/|$)|comms\/qr\.svg$)/;
+app.use((req, res, next) => {
+  if (req.rt || !/^\/(api\/|uploads\/|logo$)/.test(req.path) || NO_ORG_OK.test(req.path)) return next();
+  res.status(req.user ? 409 : 401).json(req.user ? { error: 'Create an organization first', noOrg: true } : { error: 'Sign in first', login: true });
+});
+
+// The website: things that only make sense on a computer at the venue.
+const HOST_ONLY = /^\/api\/(system|remote|comms\/remote|auth\/require-login|pin\/check)(\/|$)/;
+app.use((req, res, next) => (HOSTED && HOST_ONLY.test(req.path) ? res.status(404).json({ error: 'Not available on the website' }) : next()));
 
 const images = /^image\/(jpeg|png|webp|gif|heic|heif|svg\+xml)$/;
 const upload = multer({
@@ -169,7 +281,7 @@ const photoUpload = [upload.single('photo'), async (req, res, next) => {
   if (!req.file) return next();
   try {
     req.file.filename = `${crypto.randomUUID()}${path.extname(req.file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '') || '.jpg'}`;
-    await rt.store.savePhoto(req.file.filename, req.file.buffer, req.file.mimetype);
+    await req.rt.store.savePhoto(req.file.filename, req.file.buffer, req.file.mimetype);
     next();
   } catch (e) { res.status(400).json({ error: e.message }); }
 }];
@@ -180,21 +292,59 @@ const wrap = (fn) => async (req, res) => {
 };
 
 app.get('/api/config', (req, res) => res.json(publicConfig(req)));
-app.get('/api/state', (_req, res) => res.json(rt.snapshot()));
-app.post('/api/pin/check', need('admin'), (_req, res) => res.json({ ok: true }));
+app.get('/api/state', (req, res) => res.json(req.rt.snapshot()));
+app.post('/api/pin/check', need('admin'), (req, res) => res.json({ ok: true }));
 
 // ---- accounts & sign in
-const signIn = (req, res, token) => res.setHeader('set-cookie', sessionCookie(token, { secure: req.secure || Boolean(req.viaTunnel) }));
+const signIn = (req, res, token) => res.append('set-cookie', sessionCookie(token, { secure: req.secure || Boolean(req.viaTunnel) }));
+/** Website: remember which organization this browser is working in. */
+const pickOrg = (req, res, id) => res.append('set-cookie', `wavs_org=${encodeURIComponent(id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${400 * 86400}${req.secure ? '; Secure' : ''}`);
 const clientIp = (req) => (req.viaTunnel && req.get('cf-connecting-ip')) || req.socket.remoteAddress || '';
 // What the sign-in page needs (public, even when sign-in is required to view).
 app.get('/api/auth/status', (req, res) => res.json({
-  org: { name: rt.settings.org.name, theme: rt.settings.org.theme, logo: Boolean(orgs.logoKey(rt.orgId)) },
-  auth: { enabled: auth.enabled, user: req.user ? { name: req.user.name } : null, role: auth.roleIn(req.user, rt.orgId) },
-  pinRequired: !auth.enabled && Boolean(rt.settings.security.adminPin),
+  org: req.rt ? { name: req.rt.settings.org.name, theme: req.rt.settings.org.theme, logo: Boolean(orgs.logoKey(req.rt.orgId)) } : HOSTED ? { name: site.name, theme: {}, logo: false } : null,
+  auth: { enabled: accountsOn(), user: req.user ? { name: req.user.name } : null, role: req.rt ? auth.roleIn(req.user, req.rt.orgId) : null },
+  pinRequired: !accountsOn() && Boolean(req.rt?.settings.security.adminPin),
+  hosted: HOSTED,
+  signups: HOSTED ? site.signups : null,
 }));
+
+// ---- website: anyone can sign up (open, with the beta code, or closed) and gets their own organization.
+const OWNER_EMAIL = String(process.env.WAVS_OWNER_EMAIL || '').trim().toLowerCase();
+const signupTries = new Map(); // ip -> { n, at }
+app.post('/api/auth/signup', wrap((req, res) => {
+  if (!HOSTED) throw new Error('Ask the dashboard\'s admin for an invite link');
+  const b = req.body || {};
+  const ip = req.ip || '';
+  const t = signupTries.get(ip);
+  if (t && Date.now() - t.at < 3600000 && t.n >= 5) throw new Error('Too many new accounts from here. Try again in an hour.');
+  signupTries.set(ip, t && Date.now() - t.at < 3600000 ? { n: t.n + 1, at: t.at } : { n: 1, at: Date.now() });
+  // The site owner (WAVS_OWNER_EMAIL) can always sign up first, and becomes the owner.
+  const ownerSignup = Boolean(OWNER_EMAIL) && String(b.username || '').trim().toLowerCase() === OWNER_EMAIL && !auth.data.users.some((u) => u.owner);
+  site.check(b.code, { ownerSignup });
+  const orgName = String(b.orgName || '').trim();
+  if (!orgName) throw new Error('Name your church or organization');
+  const u = auth.create({ name: b.name, username: b.username, password: b.password, owner: ownerSignup });
+  const id = orgs.create(orgName);
+  auth.join(u.id, id, 'admin');
+  console.log(`[site] new account${ownerSignup ? ' (owner)' : ''} with organization "${orgName}"`);
+  signIn(req, res, auth.startSession(u));
+  pickOrg(req, res, id);
+  res.json({ ok: true, orgId: id });
+}));
+// The site owner: who may sign up, and the beta code.
+const siteOwner = (req) => { if (!HOSTED || !req.user?.owner) throw new Error('Only the site owner can do that'); };
+app.get('/api/site', wrap((req, res) => {
+  siteOwner(req);
+  res.json({ ...site.view(), accounts: auth.data.users.length, orgs: orgs.data.orgs.map((o) => ({ id: o.id, name: o.name, people: auth.data.users.filter((u) => auth.memberOf(u, o.id)).length, running: runtimes.has(o.id) })) });
+}));
+app.put('/api/site', wrap((req, res) => { siteOwner(req); res.json(site.update(req.body || {})); }));
+
 app.post('/api/auth/owner', wrap((req, res) => {
+  if (HOSTED) throw new Error('On the website, the owner signs up with the email in WAVS_OWNER_EMAIL');
+  if (!req.rt) throw new Error('No organization yet');
   // The first account. If the old admin PIN is set, it's needed to claim the dashboard.
-  if (rt.settings.security.adminPin && !checkPin(rt.settings.security.adminPin, req.body?.pin)) throw new Error('Enter the current admin PIN to create the owner account');
+  if (req.rt.settings.security.adminPin && !checkPin(req.rt.settings.security.adminPin, req.body?.pin)) throw new Error('Enter the current admin PIN to create the owner account');
   const u = auth.createOwner(req.body || {});
   signIn(req, res, auth.startSession(u));
   res.json({ ok: true });
@@ -224,6 +374,7 @@ app.post('/api/auth/invite/:code', wrap((req, res) => {
 /** Address others can open: this request's host, unless that's "localhost" on this computer. */
 function shareBase(req) {
   const host = req.get('host') || '';
+  if (HOSTED) return `${req.protocol}://${host}`;
   if (req.viaTunnel) return `https://${host}`;
   if (!/^(localhost|127\.|\[::1\])/.test(host)) return `${req.protocol}://${host}`;
   const port = cfg.server.port === 80 ? '' : `:${cfg.server.port}`;
@@ -237,6 +388,7 @@ function shareBase(req) {
  * them can't look up ".local" names. Set a DHCP reservation for this computer so it stays put.
  */
 function tvBase(req) {
+  if (HOSTED) return shareBase(req);
   const ip = lanAddresses()[0]?.address;
   if (!ip) return shareBase(req);
   const port = localName.port80 || cfg.server.port === 80 ? '' : `:${cfg.server.port}`;
@@ -245,29 +397,41 @@ function tvBase(req) {
 
 app.get('/api/users', need('admin'), (req, res) => {
   res.json({
-    users: auth.data.users.map((u) => auth.view(u, rt.orgId)),
-    invites: auth.data.invites.filter((i) => i.orgId === rt.orgId && i.expires > Date.now()).map((i) => ({ ...i, url: `${shareBase(req)}/join/${i.code}`, anywhereUrl: offsiteUrl(`/join/${i.code}`) })),
+    // The website only shows this organization's team.
+    users: auth.data.users.filter((u) => !HOSTED || auth.memberOf(u, req.rt.orgId)).map((u) => auth.view(u, req.rt.orgId)),
+    invites: auth.data.invites.filter((i) => i.orgId === req.rt.orgId && i.expires > Date.now()).map((i) => ({ ...i, url: `${shareBase(req)}/join/${i.code}`, anywhereUrl: offsiteUrl(`/join/${i.code}`) })),
     requireLogin: Boolean(auth.data.requireLogin),
     orgs: orgs.data.orgs,
   });
 });
 app.post('/api/users/invite', need('admin'), wrap((req, res) => {
-  const inv = auth.invite({ orgId: rt.orgId, role: req.body?.role, by: req.user?.id, days: req.body?.days, label: req.body?.label });
+  const inv = auth.invite({ orgId: req.rt.orgId, role: req.body?.role, by: req.user?.id, days: req.body?.days, label: req.body?.label });
   res.json({ ...inv, url: `${shareBase(req)}/join/${inv.code}`, anywhereUrl: offsiteUrl(`/join/${inv.code}`) });
 }));
 app.delete('/api/users/invite/:code', need('admin'), wrap((req, res) => { auth.revokeInvite(req.params.code); res.json({ ok: true }); }));
 app.put('/api/users/:id/role', need('admin'), wrap((req, res) => {
   if (req.params.id === req.user?.id) throw new Error("You can't change your own role");
-  auth.setRole(req.params.id, rt.orgId, req.body?.role || null);
+  if (HOSTED && !auth.memberOf(auth.user(req.params.id), req.rt.orgId)) throw new Error('That account isn\'t on this team. Send them an invite link.');
+  auth.setRole(req.params.id, req.rt.orgId, req.body?.role || null);
   res.json({ ok: true });
 }));
-app.post('/api/users/:id/reset', need('admin'), wrap((req, res) => res.json({ password: auth.resetPassword(req.params.id) })));
+app.post('/api/users/:id/reset', need('admin'), wrap((req, res) => {
+  const u = auth.user(req.params.id);
+  if (!u) throw new Error('Unknown account');
+  if (u.owner && !req.user?.owner) throw new Error("The owner's password can only be changed by the owner");
+  // Website: an admin can only reset accounts that belong to their organization alone.
+  if (HOSTED && !req.user?.owner) {
+    if (!auth.memberOf(u, req.rt.orgId)) throw new Error('That account isn\'t on this team');
+    if (Object.keys(u.roles || {}).some((id) => id !== req.rt.orgId && orgs.data.orgs.some((o) => o.id === id))) throw new Error('That account is also on another organization\'s team, so only they (or the site owner) can change its password');
+  }
+  res.json({ password: auth.resetPassword(req.params.id) });
+}));
 app.delete('/api/users/:id', need('admin'), wrap((req, res) => {
   if (!req.user?.owner) throw new Error('Only the owner can delete accounts. You can remove their access to this organization instead.');
   auth.remove(req.params.id);
   res.json({ ok: true });
 }));
-app.put('/api/auth/require-login', need('admin'), wrap((req, res) => { auth.setRequireLogin(req.body?.on); broadcast({ type: 'reload' }); res.json({ ok: true }); }));
+app.put('/api/auth/require-login', need('admin'), wrap((req, res) => { auth.setRequireLogin(req.body?.on); broadcastAll({ type: 'reload' }); res.json({ ok: true }); }));
 
 // ---- this computer: address, background service, version and updates (admins)
 app.get('/api/system', need('admin'), wrap(async (req, res) => {
@@ -295,13 +459,13 @@ app.put('/api/system/name', need('admin'), wrap(async (req, res) => {
 
 // ---- where the setup is saved: this computer, or a cloud database (MongoDB Atlas)
 const ownerOnly = (req) => {
-  if (auth.enabled && !req.user?.owner) throw new Error('Only the owner can change where everything is saved');
+  if (accountsOn() && !req.user?.owner) throw new Error('Only the owner can change where everything is saved');
 };
 const orgNames = (d) => (d.get('orgs.json')?.orgs || []).map((o) => o.name);
 /** After switching, start again with the new place (automatic when running in the background). */
 const restartForStorage = () => system.restartSoon();
 
-app.get('/api/system/database', need('admin'), (_req, res) => {
+app.get('/api/system/database', need('admin'), (req, res) => {
   const conf = databaseConfig(dataDir);
   res.json({ ...docs.status(), problem: storageProblem, configured: Boolean(conf), fromEnv: Boolean(conf?.fromEnv), host: conf ? mongoHost(conf.uri) : null, canRestart: system.asService });
 });
@@ -353,9 +517,9 @@ app.delete('/api/system/database', need('admin'), wrap(async (req, res) => {
 
 // ---- move organizations between host computers (backup file)
 app.post('/api/backup', need('admin'), wrap(async (req, res) => {
-  const ids = (Array.isArray(req.body?.orgs) ? req.body.orgs : [rt.orgId]).map(String);
+  const ids = (Array.isArray(req.body?.orgs) ? req.body.orgs : [req.rt.orgId]).map(String);
   // An admin can take the organizations they're admin of (the owner: all of them).
-  if (auth.enabled) for (const id of ids) if (auth.rank(req.user, id) < RANK.admin) throw new Error("You can only back up organizations you're an admin of");
+  if (accountsOn()) for (const id of ids) if (auth.rank(req.user, id) < RANK.admin) throw new Error("You can only back up organizations you're an admin of");
   const buf = await createBackup({ orgs, auth, orgIds: ids, password: String(req.body?.password || '') });
   const names = ids.map((id) => orgs.data.orgs.find((o) => o.id === id)?.name || id).join(' + ');
   const file = `WAVS ${names} ${new Date().toISOString().slice(0, 10)}.wavsbackup`.replace(/[^\w .+-]/g, '');
@@ -373,7 +537,7 @@ app.post('/api/backup/inspect', need('admin'), rawBody, wrap((req, res) => {
   try { data = readBackup(buf, req.get('x-backup-password') || ''); } catch (e) { if (!e.needsPassword) throw e; return res.json({ token, encrypted: true, needsPassword: true, error: req.get('x-backup-password') ? e.message : null }); }
   res.json({
     token, encrypted: isEncrypted(buf), createdAt: data.createdAt,
-    orgs: data.orgs.map((o) => ({ id: o.id, name: o.name, files: Object.keys(o.files).length, exists: orgs.data.orgs.some((x) => x.id === o.id), active: o.id === rt.orgId })),
+    orgs: data.orgs.map((o) => ({ id: o.id, name: o.name, files: Object.keys(o.files).length, exists: !HOSTED && orgs.data.orgs.some((x) => x.id === o.id), active: !HOSTED && o.id === req.rt.orgId })),
     users: (data.users || []).length,
   });
 }));
@@ -381,57 +545,90 @@ app.post('/api/backup/import', need('admin'), wrap(async (req, res) => {
   const p = pendingImports.get(String(req.body?.token));
   if (!p) throw new Error('Choose the backup file again (it expired)');
   const data = readBackup(p.buf, String(req.body?.password || ''));
-  const choices = req.body?.choices || {};
-  // Replacing the organization that's running: stop it first so nothing overwrites the new files.
-  const replacingActive = choices[rt.orgId] === 'replace';
-  if (replacingActive) rt.stop();
+  const choices = { ...(req.body?.choices || {}) };
+  for (const [id, mode] of Object.entries(choices)) {
+    // Replacing needs admin rights there; the website always adds a separate copy.
+    if (mode === 'replace' && (HOSTED || (accountsOn() && auth.rank(req.user, id) < RANK.admin))) choices[id] = HOSTED ? 'new' : 'skip';
+  }
+  if (HOSTED) for (const o of data.orgs) if (choices[o.id] !== 'skip') choices[o.id] = 'new';
+  // Replacing an organization that's running: stop it first so nothing overwrites the new files.
+  const replacing = Object.entries(choices).filter(([, m]) => m === 'replace').map(([id]) => id).filter((id) => runtimes.has(id));
+  for (const id of replacing) stopRuntime(id);
   let result;
-  try { result = await importBackup({ data, orgs, auth, choices }); } finally { if (replacingActive) startRuntime(); }
+  try { result = await importBackup({ data, orgs, auth, choices, withUsers: !HOSTED }); } finally { for (const id of replacing) runtimeFor(id); }
+  // Website: whoever imported it runs the new organization.
+  if (HOSTED) for (const r of result.imported) auth.join(req.user.id, r.id, 'admin');
   pendingImports.delete(String(req.body?.token));
-  broadcast({ type: 'reload' });
-  res.json({ ...result, signInNeeded: auth.enabled && !req.user });
+  if (HOSTED) broadcastTo(req.rt.orgId, { type: 'reload' }); else broadcastAll({ type: 'reload' });
+  res.json({ ...result, signInNeeded: accountsOn() && !req.user });
 }));
 
-app.post('/api/system/check', need('admin'), wrap(async (_req, res) => res.json(await system.check())));
-app.post('/api/system/update', need('admin'), wrap(async (_req, res) => {
+app.post('/api/system/check', need('admin'), wrap(async (req, res) => res.json(await system.check())));
+app.post('/api/system/update', need('admin'), wrap(async (req, res) => {
   const r = await system.update();
   res.json(r);
   if (r.restart) system.restartSoon(); // screens reload by themselves when they reconnect (new boot id)
 }));
 
 // ---- organizations
-app.get('/api/orgs', (_req, res) => res.json({ active: rt.orgId, orgs: orgs.list() }));
-app.post('/api/orgs', need('admin'), wrap((req, res) => {
+const orgList = (user) => myOrgs(user).map((o) => ({ id: o.id, name: o.name, color: orgs.read(o.id).org.theme.accent }));
+app.get('/api/orgs', (req, res) => res.json({ active: req.rt?.orgId || null, orgs: HOSTED && !req.user ? [] : orgList(req.user) }));
+// New organization. Website: anyone signed in (up to 5 of their own); host computer: admins.
+app.post('/api/orgs', (req, res, next) => (HOSTED ? next() : need('admin')(req, res, next)), wrap((req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) throw new Error('Give the organization a name');
+  if (HOSTED) {
+    if (!req.user) throw new Error('Sign in first');
+    const mine = orgs.data.orgs.filter((o) => req.user.roles?.[o.id] === 'admin').length;
+    if (!req.user.owner && mine >= 5) throw new Error('You can have up to 5 organizations during the beta');
+  }
   const id = orgs.create(name);
-  if (req.user && !req.user.owner) auth.setRole(req.user.id, id, 'admin');
-  orgs.setActive(id);
-  restartRuntime();
+  if (req.user && (HOSTED || !req.user.owner)) auth.join(req.user.id, id, 'admin');
+  if (HOSTED) pickOrg(req, res, id); else switchActive(id);
   res.json({ id });
 }));
-app.post('/api/orgs/active', need('admin'), wrap((req, res) => {
-  if (auth.enabled && auth.rank(req.user, String(req.body?.id)) < RANK.admin) throw new Error("You're not an admin of that organization");
-  orgs.setActive(String(req.body?.id));
-  restartRuntime();
+app.post('/api/orgs/active', (req, res, next) => (HOSTED ? next() : need('admin')(req, res, next)), wrap((req, res) => {
+  const id = String(req.body?.id);
+  if (HOSTED) {
+    if (!req.user || auth.rank(req.user, id) < 1) throw new Error("You're not on that organization's team");
+    pickOrg(req, res, id);
+    return res.json({ ok: true });
+  }
+  if (auth.enabled && auth.rank(req.user, id) < RANK.admin) throw new Error("You're not an admin of that organization");
+  switchActive(id);
   res.json({ ok: true });
 }));
-app.delete('/api/orgs/:id', need('admin'), wrap((req, res) => { orgs.remove(req.params.id); broadcast({ type: 'reload' }); res.json({ ok: true }); }));
+app.delete('/api/orgs/:id', need('admin'), wrap((req, res) => {
+  const id = req.params.id;
+  if (accountsOn() && auth.rank(req.user, id) < RANK.admin) throw new Error("You're not an admin of that organization");
+  if (HOSTED) {
+    if (!orgs.data.orgs.some((o) => o.id === id)) throw new Error('Unknown organization');
+    broadcastTo(id, { type: 'reload' });
+    stopRuntime(id);
+    orgs.data.orgs = orgs.data.orgs.filter((o) => o.id !== id);
+    orgs.save();
+    orgs.docs.remove(`orgs/${id}`);
+  } else orgs.remove(id);
+  if (!HOSTED) broadcastAll({ type: 'reload' });
+  res.json({ ok: true });
+}));
 
 // ---- settings (gear, branding, Planning Center, alerts) for the active organization
-app.get('/api/settings', (_req, res) => res.json(maskSettings(rt.settings)));
+app.get('/api/settings', (req, res) => res.json(maskSettings(req.rt.settings)));
 app.put('/api/settings', need('admin'), wrap((req, res) => {
-  const next = mergeIncoming(rt.settings, req.body || {});
-  orgs.write(rt.orgId, next);
-  restartRuntime();
+  const next = mergeIncoming(req.rt.settings, req.body || {});
+  orgs.write(req.rt.orgId, next);
+  restartRuntime(req.rt.orgId);
   res.json(maskSettings(next));
 }));
 app.post('/api/settings/test', need('admin'), wrap(async (req, res) => {
   const { kind, device } = req.body || {};
+  // The website can only test services on the internet, never addresses on someone's network.
+  if (HOSTED && !['planningCenter', 'stream'].includes(kind)) return res.json({ ok: false, detail: 'The website can\'t reach gear on your network. The venue computer will test it (coming soon).' });
   const dev = { ...device };
-  if (kind === 'planningCenter' && dev.secret === '••••••••') dev.secret = rt.settings.planningCenter?.secret;
+  if (kind === 'planningCenter' && dev.secret === '••••••••') dev.secret = req.rt.settings.planningCenter?.secret;
   if (kind === 'stream') {
-    const saved = (rt.settings.streams || []).find((x) => x.id === dev.id) || {};
+    const saved = (req.rt.settings.streams || []).find((x) => x.id === dev.id) || {};
     if (dev.apiKey === '••••••••') dev.apiKey = saved.apiKey;
     if (dev.token === '••••••••') dev.token = saved.token;
   }
@@ -439,154 +636,156 @@ app.post('/api/settings/test', need('admin'), wrap(async (req, res) => {
 }));
 app.post('/api/settings/logo', need('admin'), logoUpload.single('logo'), wrap(async (req, res) => {
   if (!req.file) throw new Error('Choose a PNG, JPEG or WebP image');
-  await orgs.setLogo(rt.orgId, req.file.buffer, req.file.mimetype.split('/')[1].replace('jpeg', 'jpg'));
-  broadcast({ type: 'reload' });
+  await orgs.setLogo(req.rt.orgId, req.file.buffer, req.file.mimetype.split('/')[1].replace('jpeg', 'jpg'));
+  broadcastTo(req.rt.orgId, { type: 'reload' });
   res.json({ ok: true });
 }));
-app.delete('/api/settings/logo', need('admin'), wrap(async (_req, res) => {
-  await orgs.setLogo(rt.orgId, null);
-  broadcast({ type: 'reload' });
+app.delete('/api/settings/logo', need('admin'), wrap(async (req, res) => {
+  await orgs.setLogo(req.rt.orgId, null);
+  broadcastTo(req.rt.orgId, { type: 'reload' });
   res.json({ ok: true });
 }));
-app.post('/api/gear/reconnect', need('admin'), wrap((_req, res) => { restartRuntime(); res.json({ ok: true }); }));
+app.post('/api/gear/reconnect', need('admin'), wrap((req, res) => { restartRuntime(req.rt.orgId); res.json({ ok: true }); }));
 
 // ---- people & mic assignments
 app.post('/api/people', need('producer'), photoUpload, wrap((req, res) => {
-  res.json(rt.store.addPerson({ ...req.body, photo: req.file?.filename || null }));
+  res.json(req.rt.store.addPerson({ ...req.body, photo: req.file?.filename || null }));
 }));
 app.put('/api/people/:id', need('producer'), photoUpload, wrap((req, res) => {
   const fields = { ...req.body };
   if (req.file) fields.photo = req.file.filename;
   else if (req.body.removePhoto === 'true') fields.photo = null;
-  res.json(rt.store.updatePerson(req.params.id, fields));
+  res.json(req.rt.store.updatePerson(req.params.id, fields));
 }));
 app.put('/api/people/:id/face', need('producer'), wrap((req, res) => {
-  res.json(rt.store.setFace(req.params.id, { photo: req.body?.photo, face: req.body?.face, manual: Boolean(req.body?.manual) }));
+  res.json(req.rt.store.setFace(req.params.id, { photo: req.body?.photo, face: req.body?.face, manual: Boolean(req.body?.manual) }));
 }));
-app.delete('/api/people/:id', need('producer'), wrap((req, res) => { rt.store.removePerson(req.params.id); res.json({ ok: true }); }));
+app.delete('/api/people/:id', need('producer'), wrap((req, res) => { req.rt.store.removePerson(req.params.id); res.json({ ok: true }); }));
 
 // Alerts: snooze one for everyone for a few minutes (it comes back by itself), or wake it.
-app.post('/api/alerts/snooze', need('crew'), wrap((req, res) => { rt.snooze(String(req.body?.key || ''), req.body?.minutes ?? 10); res.json({ ok: true }); }));
+app.post('/api/alerts/snooze', need('crew'), wrap((req, res) => { req.rt.snooze(String(req.body?.key || ''), req.body?.minutes ?? 10); res.json({ ok: true }); }));
 app.put('/api/assignments/:micId', need('crew'), wrap((req, res) => {
-  if (!rt.micSlots.some((m) => m.id === req.params.micId)) throw new Error('Unknown mic');
-  const result = rt.store.assign(req.params.micId, req.body || {});
-  if (rt.settings.control.pushNamesToReceivers && req.body?.personId !== undefined) rt.pushName(req.params.micId);
+  if (!req.rt.micSlots.some((m) => m.id === req.params.micId)) throw new Error('Unknown mic');
+  const result = req.rt.store.assign(req.params.micId, req.body || {});
+  if (req.rt.settings.control.pushNamesToReceivers && req.body?.personId !== undefined) req.rt.pushName(req.params.micId);
   res.json(result);
 }));
-app.post('/api/assignments/clear', need('producer'), wrap((_req, res) => { rt.store.clearAssignments(); res.json({ ok: true }); }));
-app.put('/api/service', need('producer'), wrap((req, res) => { rt.store.setService({ name: req.body?.name ?? null, notes: req.body?.notes ?? '' }); res.json(rt.store.data.service); }));
+app.post('/api/assignments/clear', need('producer'), wrap((req, res) => { req.rt.store.clearAssignments(); res.json({ ok: true }); }));
+app.put('/api/service', need('producer'), wrap((req, res) => { req.rt.store.setService({ name: req.body?.name ?? null, notes: req.body?.notes ?? '' }); res.json(req.rt.store.data.service); }));
 app.post('/api/mics/:micId/push-name', need('producer'), wrap((req, res) => {
-  if (!rt.pushName(req.params.micId)) throw new Error('Receiver does not support naming or nobody is assigned');
+  if (!req.rt.pushName(req.params.micId)) throw new Error('Receiver does not support naming or nobody is assigned');
   res.json({ ok: true });
 }));
 
 // ---- service plan (Planning Center or manual)
-app.get('/api/service', (_req, res) => res.json(rt.service.state()));
+app.get('/api/service', (req, res) => res.json(req.rt.service.state()));
 app.post('/api/service/pco', need('producer'), wrap(async (req, res) => {
-  await rt.service.selectPco(String(req.body?.serviceTypeId), String(req.body?.planId));
-  const picked = rt.service.upcoming.find((u) => u.id === String(req.body?.planId));
-  livePlan({ source: 'pco', serviceTypeId: String(req.body?.serviceTypeId), planId: String(req.body?.planId), pcoTitle: picked?.title || '' });
-  res.json(rt.service.state());
+  await req.rt.service.selectPco(String(req.body?.serviceTypeId), String(req.body?.planId));
+  const picked = req.rt.service.upcoming.find((u) => u.id === String(req.body?.planId));
+  livePlan(req.rt, { source: 'pco', serviceTypeId: String(req.body?.serviceTypeId), planId: String(req.body?.planId), pcoTitle: picked?.title || '' });
+  res.json(req.rt.service.state());
 }));
-app.post('/api/service/pco/refresh', need('producer'), wrap(async (_req, res) => {
-  await rt.service.refreshUpcoming();
-  await rt.service.reloadPco();
-  res.json(rt.service.state());
+app.post('/api/service/pco/refresh', need('producer'), wrap(async (req, res) => {
+  await req.rt.service.refreshUpcoming();
+  await req.rt.service.reloadPco();
+  res.json(req.rt.service.state());
 }));
 // Changing the plan while a scheduled service is live also changes that service.
-const livePlan = (fields) => rt.schedule.syncLive({ plan: { ...(rt.schedule.live()?.plan || {}), ...fields } });
+const livePlan = (rt, fields) => rt.schedule.syncLive({ plan: { ...(rt.schedule.live()?.plan || {}), ...fields } });
 app.put('/api/service/manual', need('producer'), wrap((req, res) => {
-  rt.service.setManual({ title: String(req.body?.title || ''), text: String(req.body?.text || ''), start: String(req.body?.start || '') });
-  livePlan({ source: 'manual', text: String(req.body?.text || '') });
-  res.json(rt.service.state());
+  req.rt.service.setManual({ title: String(req.body?.title || ''), text: String(req.body?.text || ''), start: String(req.body?.start || '') });
+  livePlan(req.rt, { source: 'manual', text: String(req.body?.text || '') });
+  res.json(req.rt.service.state());
 }));
 // Matching ProPresenter's playlist to the plan: what each item matches now, and setting links.
-const activePlaylist = () => Object.entries(rt.hub.state.propresenter || {}).map(([id, p]) => ({ id, ...p })).find((p) => p.online && p.playlist?.items?.length);
-app.get('/api/service/pp-match', need('producer'), (_req, res) => {
-  const pp = activePlaylist();
-  res.json({ pp: pp ? { id: pp.id, name: pp.name } : null, playlist: pp ? { name: pp.playlist.name, index: pp.playlist.index, items: rt.service.preview(pp.playlist) } : null, source: rt.service.saved.source });
+const activePlaylist = (rt) => Object.entries(rt.hub.state.propresenter || {}).map(([id, p]) => ({ id, ...p })).find((p) => p.online && p.playlist?.items?.length);
+app.get('/api/service/pp-match', need('producer'), (req, res) => {
+  const pp = activePlaylist(req.rt);
+  res.json({ pp: pp ? { id: pp.id, name: pp.name } : null, playlist: pp ? { name: pp.playlist.name, index: pp.playlist.index, items: req.rt.service.preview(pp.playlist) } : null, source: req.rt.service.saved.source });
 });
 app.put('/api/service/links', need('producer'), wrap((req, res) => {
   const { key, name, itemId } = req.body || {};
-  rt.service.setLink({ key: String(key), name: String(name || ''), itemId: itemId || null });
-  const pp = activePlaylist(); // the cued item may now point somewhere else: follow it
-  if (pp && rt.service.saved.source !== 'propresenter') rt.service.onPlaylist(pp.playlist);
+  req.rt.service.setLink({ key: String(key), name: String(name || ''), itemId: itemId || null });
+  const pp = activePlaylist(req.rt); // the cued item may now point somewhere else: follow it
+  if (pp && req.rt.service.saved.source !== 'propresenter') req.rt.service.onPlaylist(pp.playlist);
   res.json({ ok: true });
 }));
-app.post('/api/service/propresenter', need('producer'), wrap((_req, res) => { rt.service.useProPresenter(); livePlan({ source: 'propresenter' }); res.json(rt.service.state()); }));
+app.post('/api/service/propresenter', need('producer'), wrap((req, res) => { req.rt.service.useProPresenter(); livePlan(req.rt, { source: 'propresenter' }); res.json(req.rt.service.state()); }));
 
 // ---- schedule: services planned ahead (events, recurring), which one is live
-app.get('/api/schedule', (_req, res) => res.json(rt.schedule.view()));
-app.post('/api/schedule/services', need('producer'), wrap((req, res) => res.json(rt.schedule.addService(req.body || {}))));
+app.get('/api/schedule', (req, res) => res.json(req.rt.schedule.view()));
+app.post('/api/schedule/services', need('producer'), wrap((req, res) => res.json(req.rt.schedule.addService(req.body || {}))));
 app.put('/api/schedule/services/:id', need('producer'), wrap((req, res) => {
-  const planBefore = JSON.stringify(rt.schedule.get(req.params.id)?.plan);
-  const s = rt.schedule.updateService(req.params.id, req.body || {});
+  const planBefore = JSON.stringify(req.rt.schedule.get(req.params.id)?.plan);
+  const s = req.rt.schedule.updateService(req.params.id, req.body || {});
   // Editing the live service: load the changes (hand-off statuses are kept; the plan only if it changed).
-  if (rt.schedule.data.liveId === s.id) rt.goLive(s.id, 'edit', { reloadPlan: JSON.stringify(s.plan) !== planBefore });
+  if (req.rt.schedule.data.liveId === s.id) req.rt.goLive(s.id, 'edit', { reloadPlan: JSON.stringify(s.plan) !== planBefore });
   res.json(s);
 }));
-app.delete('/api/schedule/services/:id', need('producer'), wrap((req, res) => { rt.schedule.removeService(req.params.id); res.json({ ok: true }); }));
-app.post('/api/schedule/services/:id/duplicate', need('producer'), wrap((req, res) => res.json(rt.schedule.duplicate(req.params.id, req.body || {}))));
-app.post('/api/schedule/services/:id/live', need('producer'), wrap((req, res) => res.json(rt.goLive(req.params.id))));
-app.post('/api/schedule/next', need('producer'), wrap((_req, res) => {
-  const next = rt.schedule.next();
+app.delete('/api/schedule/services/:id', need('producer'), wrap((req, res) => { req.rt.schedule.removeService(req.params.id); res.json({ ok: true }); }));
+app.post('/api/schedule/services/:id/duplicate', need('producer'), wrap((req, res) => res.json(req.rt.schedule.duplicate(req.params.id, req.body || {}))));
+app.post('/api/schedule/services/:id/live', need('producer'), wrap((req, res) => res.json(req.rt.goLive(req.params.id))));
+app.post('/api/schedule/next', need('producer'), wrap((req, res) => {
+  const next = req.rt.schedule.next();
   if (!next) throw new Error('Nothing else is scheduled. Add services on the Schedule page.');
-  res.json(rt.goLive(next.id));
+  res.json(req.rt.goLive(next.id));
 }));
-app.post('/api/schedule/undo', need('producer'), wrap((_req, res) => { rt.undoLive(); res.json(rt.schedule.view()); }));
-app.post('/api/schedule/end', need('producer'), wrap((_req, res) => { rt.clearLive({ end: true }); rt.checkSchedule(); res.json(rt.schedule.view()); }));
+app.post('/api/schedule/undo', need('producer'), wrap((req, res) => { req.rt.undoLive(); res.json(req.rt.schedule.view()); }));
+app.post('/api/schedule/end', need('producer'), wrap((req, res) => { req.rt.clearLive({ end: true }); req.rt.checkSchedule(); res.json(req.rt.schedule.view()); }));
 // Nothing is live but an order of service is still loaded (e.g. from before the schedule): clear it.
-app.post('/api/schedule/clear', need('producer'), wrap((_req, res) => {
-  if (rt.schedule.data.liveId) throw new Error('A service is live: use End service');
-  rt.clearLive({ end: false });
-  res.json(rt.schedule.view());
+app.post('/api/schedule/clear', need('producer'), wrap((req, res) => {
+  if (req.rt.schedule.data.liveId) throw new Error('A service is live: use End service');
+  req.rt.clearLive({ end: false });
+  res.json(req.rt.schedule.view());
 }));
-app.put('/api/schedule/options', need('producer'), wrap((req, res) => { rt.schedule.setOptions(req.body || {}); rt.checkSchedule(); res.json(rt.schedule.view()); }));
-app.post('/api/schedule/events', need('producer'), wrap((req, res) => res.json(rt.schedule.addEvent(req.body || {}))));
-app.put('/api/schedule/events/:id', need('producer'), wrap((req, res) => res.json(rt.schedule.updateEvent(req.params.id, req.body || {}))));
-app.delete('/api/schedule/events/:id', need('producer'), wrap((req, res) => { rt.schedule.removeEvent(req.params.id, { withServices: req.query.services === '1' }); res.json({ ok: true }); }));
-app.post('/api/schedule/templates', need('producer'), wrap((req, res) => res.json(rt.schedule.saveTemplate(req.body || {}))));
-app.delete('/api/schedule/templates/:id', need('producer'), wrap((req, res) => { rt.schedule.removeTemplate(req.params.id); res.json({ ok: true }); }));
+app.put('/api/schedule/options', need('producer'), wrap((req, res) => { req.rt.schedule.setOptions(req.body || {}); req.rt.checkSchedule(); res.json(req.rt.schedule.view()); }));
+app.post('/api/schedule/events', need('producer'), wrap((req, res) => res.json(req.rt.schedule.addEvent(req.body || {}))));
+app.put('/api/schedule/events/:id', need('producer'), wrap((req, res) => res.json(req.rt.schedule.updateEvent(req.params.id, req.body || {}))));
+app.delete('/api/schedule/events/:id', need('producer'), wrap((req, res) => { req.rt.schedule.removeEvent(req.params.id, { withServices: req.query.services === '1' }); res.json({ ok: true }); }));
+app.post('/api/schedule/templates', need('producer'), wrap((req, res) => res.json(req.rt.schedule.saveTemplate(req.body || {}))));
+app.delete('/api/schedule/templates/:id', need('producer'), wrap((req, res) => { req.rt.schedule.removeTemplate(req.params.id); res.json({ ok: true }); }));
 // Moving through the plan is allowed without the PIN so any operator can follow along.
-app.post('/api/service/current', need('open'), wrap((req, res) => { rt.service.setCurrent(req.body?.itemId || null, 'manual'); res.json({ ok: true }); }));
-app.post('/api/service/next', need('open'), wrap((_req, res) => { rt.service.step(1); res.json({ ok: true }); }));
-app.post('/api/service/previous', need('open'), wrap((_req, res) => { rt.service.step(-1); res.json({ ok: true }); }));
-app.post('/api/service/reset', need('producer'), wrap((_req, res) => { rt.service.resetProgress(); res.json({ ok: true }); }));
+app.post('/api/service/current', need('open'), wrap((req, res) => { req.rt.service.setCurrent(req.body?.itemId || null, 'manual'); res.json({ ok: true }); }));
+app.post('/api/service/next', need('open'), wrap((req, res) => { req.rt.service.step(1); res.json({ ok: true }); }));
+app.post('/api/service/previous', need('open'), wrap((req, res) => { req.rt.service.step(-1); res.json({ ok: true }); }));
+app.post('/api/service/reset', need('producer'), wrap((req, res) => { req.rt.service.resetProgress(); res.json({ ok: true }); }));
 
 // ---- shared notes & checklists (team-editable, no PIN)
-app.put('/api/notes/:name', need('open'), wrap((req, res) => { rt.board.setNote(req.params.name, req.body?.text); res.json({ ok: true }); }));
-app.put('/api/checklists/:name', need('open'), wrap((req, res) => { rt.board.setChecklist(req.params.name, req.body || {}); res.json({ ok: true }); }));
-app.post('/api/checklists/:name/toggle', need('open'), wrap((req, res) => { rt.board.toggle(req.params.name, req.body?.itemId, req.body?.done); res.json({ ok: true }); }));
-app.post('/api/checklists/:name/reset', need('open'), wrap((req, res) => { rt.board.resetChecklist(req.params.name); res.json({ ok: true }); }));
+app.put('/api/notes/:name', need('open'), wrap((req, res) => { req.rt.board.setNote(req.params.name, req.body?.text); res.json({ ok: true }); }));
+app.put('/api/checklists/:name', need('open'), wrap((req, res) => { req.rt.board.setChecklist(req.params.name, req.body || {}); res.json({ ok: true }); }));
+app.post('/api/checklists/:name/toggle', need('open'), wrap((req, res) => { req.rt.board.toggle(req.params.name, req.body?.itemId, req.body?.done); res.json({ ok: true }); }));
+app.post('/api/checklists/:name/reset', need('open'), wrap((req, res) => { req.rt.board.resetChecklist(req.params.name); res.json({ ok: true }); }));
 
 // ---- dashboards (layouts)
-app.get('/api/dashboards', (_req, res) => res.json(rt.dashboards.list()));
-app.post('/api/dashboards', need('producer'), wrap((req, res) => res.json(rt.dashboards.create(req.body || {}))));
-app.put('/api/dashboards/:id', need('producer'), wrap((req, res) => res.json(rt.dashboards.update(req.params.id, req.body || {}))));
-app.delete('/api/dashboards/:id', need('producer'), wrap((req, res) => { rt.dashboards.remove(req.params.id); res.json({ ok: true }); }));
+app.get('/api/dashboards', (req, res) => res.json(req.rt.dashboards.list()));
+app.post('/api/dashboards', need('producer'), wrap((req, res) => res.json(req.rt.dashboards.create(req.body || {}))));
+app.put('/api/dashboards/:id', need('producer'), wrap((req, res) => res.json(req.rt.dashboards.update(req.params.id, req.body || {}))));
+app.delete('/api/dashboards/:id', need('producer'), wrap((req, res) => { req.rt.dashboards.remove(req.params.id); res.json({ ok: true }); }));
 
 // ---- live streams: pin or hide a comment
-app.post('/api/streams/pin', need('producer'), wrap((req, res) => { rt.streams.pin(req.body?.id || null); res.json({ ok: true }); }));
-app.post('/api/streams/hide', need('producer'), wrap((req, res) => { rt.streams.hide(String(req.body?.id)); res.json({ ok: true }); }));
+app.post('/api/streams/pin', need('producer'), wrap((req, res) => { req.rt.streams.pin(req.body?.id || null); res.json({ ok: true }); }));
+app.post('/api/streams/hide', need('producer'), wrap((req, res) => { req.rt.streams.hide(String(req.body?.id)); res.json({ ok: true }); }));
 
 // ---- ProPresenter
 app.get('/api/propresenter/:id/thumbnail/:uuid/:index', async (req, res) => {
   try {
-    const img = await rt.propresenters[req.params.id]?.thumbnail(req.params.uuid, req.params.index);
+    const img = await req.rt.propresenters[req.params.id]?.thumbnail(req.params.uuid, req.params.index);
     if (!img) return res.status(404).end();
     res.set('content-type', img.type).set('cache-control', 'max-age=30').send(img.body);
   } catch { res.status(502).end(); }
 });
 app.post('/api/propresenter/:id/stage-message', need('producer'), wrap(async (req, res) => {
-  if (!rt.settings.control.propresenterStageMessage) throw new Error('Stage messages are turned off (Settings → Remote control)');
-  const pp = rt.propresenters[req.params.id];
+  if (!req.rt.settings.control.propresenterStageMessage) throw new Error('Stage messages are turned off (Settings → Remote control)');
+  const pp = req.rt.propresenters[req.params.id];
   if (!pp) throw new Error('Unknown ProPresenter');
   await pp.setStageMessage(String(req.body?.text || '').slice(0, 300));
   res.json({ ok: true });
 }));
 
 // ---- comms: join links / QR code for phones
-app.get('/api/comms/info', (_req, res) => {
+app.get('/api/comms/info', (req, res) => {
+  // Website: one link for every phone, on any network.
+  if (HOSTED) return res.json({ hosted: true, lan: [], joinUrls: [], remote: { enabled: true, status: 'on', url: `${shareBase(req)}/comms?org=${encodeURIComponent(req.rt.orgId)}` } });
   const ips = lanAddresses();
   const local = os.hostname().replace(/\.local$/i, '');
   res.json({
@@ -605,7 +804,7 @@ app.get('/api/comms/info', (_req, res) => {
 });
 // Off-site access: the whole dashboard (signed in) and comms from any network, through Cloudflare.
 const offsiteUrl = (pathname = '') => (tunnel.state.status === 'on' && tunnel.state.url ? `${tunnel.state.url}${pathname}` : null);
-app.get('/api/remote', need('admin'), (_req, res) => res.json({ ...tunnel.publicState(), url: offsiteUrl(''), accounts: auth.enabled }));
+app.get('/api/remote', need('admin'), (req, res) => res.json({ ...tunnel.publicState(), url: offsiteUrl(''), accounts: accountsOn() }));
 app.post('/api/comms/remote', need('admin'), wrap(async (req, res) => {
   const b = req.body || {};
   if (b.mode || b.token !== undefined || b.hostname !== undefined) tunnel.configure({ mode: b.mode, token: b.token, hostname: b.hostname });
@@ -639,31 +838,41 @@ const pages = {
   '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html', '/tv/:org/:dash': 'dashboard.html',
   '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/people': 'people.html', '/schedule': 'schedule.html', '/gear': 'gear.html', '/settings': 'settings.html',
   '/comms': 'comms.html', '/comms/control': 'comms-control.html', '/comms/engine': 'comms-engine.html',
-  '/login': 'login.html', '/join/:code': 'login.html',
+  '/login': 'login.html', '/join/:code': 'login.html', '/signup': 'login.html',
 };
-for (const [route, file] of Object.entries(pages)) app.get(route, (_req, res) => res.sendFile(path.join(pub, file)));
+// Website: a TV link carries its organization's key; the TV keeps it (cookie) and can then show
+// that organization's dashboards without anyone signing in. Someone signed in just switches to it.
+app.get('/tv/:org/:dash', (req, res, next) => {
+  if (!HOSTED) return next();
+  const { org } = req.params;
+  if (req.user && auth.rank(req.user, org) >= 1) pickOrg(req, res, org);
+  else if (orgs.tvKeyOk(org, req.query.k)) res.append('set-cookie', `wavs_tv=${encodeURIComponent(`${org}.${req.query.k}`)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${3650 * 86400}${req.secure ? '; Secure' : ''}`);
+  else if (!tvViewer(req)) return res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
+  next();
+});
+for (const [route, file] of Object.entries(pages)) app.get(route, (req, res) => res.sendFile(path.join(pub, file)));
 app.get('/uploads/:file', wrap(async (req, res) => {
-  const f = await rt.store.getPhoto(req.params.file);
+  const f = await req.rt.store.getPhoto(req.params.file);
   if (!f) return res.status(404).end();
   res.set('cache-control', 'public, max-age=3600').type(f.type).send(f.data);
 }));
-app.get('/logo', wrap(async (_req, res) => {
-  const key = orgs.logoKey(rt.orgId);
+app.get('/logo', wrap(async (req, res) => {
+  const key = orgs.logoKey(req.rt.orgId);
   const f = key && await orgs.docs.getFile(key);
   if (!f) return res.status(404).end();
   res.set('cache-control', 'no-cache').type(f.type).send(f.data);
 }));
 // Face finding for photo crops (runs in the browser; the models are bundled, so no internet needed).
 const faceApi = path.join(ROOT, 'node_modules/@vladmandic/face-api');
-app.get('/vendor/face-api.esm.js', (_req, res) => res.sendFile(path.join(faceApi, 'dist/face-api.esm.js'), { maxAge: '7d' }));
+app.get('/vendor/face-api.esm.js', (req, res) => res.sendFile(path.join(faceApi, 'dist/face-api.esm.js'), { maxAge: '7d' }));
 app.get('/vendor/face-models/:file', (req, res) => {
   const f = path.basename(req.params.file);
   if (!/^ssd_mobilenetv1_model/.test(f)) return res.status(404).end();
   res.sendFile(path.join(faceApi, 'model', f), { maxAge: '7d' }, (e) => e && res.status(404).end());
 });
-app.get('/vendor/hls.min.js', (_req, res) => res.sendFile(path.join(ROOT, 'node_modules/hls.js/dist/hls.min.js')));
-app.get('/vendor/gridstack-all.js', (_req, res) => res.sendFile(path.join(ROOT, 'node_modules/gridstack/dist/gridstack-all.js')));
-app.get('/vendor/gridstack.min.css', (_req, res) => res.sendFile(path.join(ROOT, 'node_modules/gridstack/dist/gridstack.min.css')));
+app.get('/vendor/hls.min.js', (req, res) => res.sendFile(path.join(ROOT, 'node_modules/hls.js/dist/hls.min.js')));
+app.get('/vendor/gridstack-all.js', (req, res) => res.sendFile(path.join(ROOT, 'node_modules/gridstack/dist/gridstack-all.js')));
+app.get('/vendor/gridstack.min.css', (req, res) => res.sendFile(path.join(ROOT, 'node_modules/gridstack/dist/gridstack.min.css')));
 app.use(express.static(pub));
 
 // ---------------------------------------------------------------- websocket
@@ -671,18 +880,18 @@ app.use(express.static(pub));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true }); // dashboards
 const commsWss = new WebSocketServer({ noServer: true }); // phones, comms engine, comms control
-commsWss.on('connection', (ws, req) => rt.comms.attach(ws, req));
+commsWss.on('connection', (ws, req) => { ws.orgId = req.rt.orgId; req.rt.comms.attach(ws, req); });
 
 function upgrade(req, socket, head) {
   req.viaTunnel = Boolean(req.viaTunnel);
   req.user = auth.session(sessionToken(req));
-  req.authRank = auth.enabled ? auth.rank(req.user, rt.orgId) : 0;
-  const { pathname: p } = new URL(req.url, 'http://x');
-  if (p === '/ws' && ((auth.enabled && auth.data.requireLogin) || req.viaTunnel) && req.authRank < 1) {
-    socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
-    return;
-  }
   const { pathname } = new URL(req.url, 'http://x');
+  req.tv = !req.user && HOSTED ? tvViewer(req) : null;
+  req.rt = runtimeFor(orgFor(req, pathname));
+  req.authRank = accountsOn() && req.rt ? auth.rank(req.user, req.rt.orgId) : 0;
+  const deny = (code) => socket.end(`HTTP/1.1 ${code}\r\n\r\n`);
+  if (!req.rt) return deny('401 Unauthorized');
+  if (pathname === '/ws' && (loginRequired() || req.viaTunnel) && accountsOn() && req.authRank < 1 && !req.tv) return deny('401 Unauthorized');
   if (pathname === '/ws') wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   else if (pathname === '/comms-ws') commsWss.handleUpgrade(req, socket, head, (ws) => commsWss.emit('connection', ws, req));
   else socket.destroy();
@@ -706,7 +915,7 @@ remoteServer.on('listening', () => {
   tunnel.port = remoteServer.address().port;
   if (tunnel.enabled) tunnel.start();
 });
-remoteServer.listen(REMOTE_PORT, '127.0.0.1');
+if (!HOSTED) remoteServer.listen(REMOTE_PORT, '127.0.0.1');
 
 // HTTPS (self-signed) so phones may use their microphone for comms. Browsers only allow
 // microphones on https:// pages (or localhost). The certificate is created once and kept in data/tls/.
@@ -726,16 +935,31 @@ async function tlsOptions() {
   return { key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) };
 }
 
-function broadcast(msg) {
+/** Every screen of one organization. */
+function broadcastTo(orgId, msg) {
+  const data = JSON.stringify(msg);
+  for (const ws of wss.clients) if (ws.readyState === 1 && ws.orgId === orgId) ws.send(data);
+}
+
+function broadcastAll(msg) {
   const data = JSON.stringify(msg);
   for (const ws of wss.clients) if (ws.readyState === 1) ws.send(data);
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   ws.isAlive = true;
+  ws.orgId = req.rt.orgId;
   ws.on('pong', () => { ws.isAlive = true; });
-  ws.send(JSON.stringify({ ...rt.snapshot(), boot: BOOT }));
+  ws.send(JSON.stringify({ ...req.rt.snapshot(), boot: BOOT }));
 });
+
+// Website: an organization nobody has used for a while stops (it starts again when someone opens it).
+if (HOSTED) {
+  setInterval(() => {
+    const inUse = new Set([...wss.clients, ...commsWss.clients].map((ws) => ws.orgId));
+    for (const [id, r] of runtimes) if (!inUse.has(id) && Date.now() - r.lastUsed > 2 * 3600000) { console.log(`[orgs] idle: ${r.settings.org.name}`); stopRuntime(id); }
+  }, 10 * 60000).unref();
+}
 setInterval(() => {
   for (const ws of wss.clients) {
     if (!ws.isAlive) { ws.terminate(); continue; }
@@ -746,8 +970,12 @@ setInterval(() => {
 
 // ---------------------------------------------------------------- start
 
-startRuntime();
-orgs.onChange = () => broadcast({ type: 'reload' }); // organizations added or renamed elsewhere
+if (!HOSTED) runtimeFor(activeId());
+// Organizations added, renamed or removed elsewhere.
+orgs.onChange = () => {
+  for (const id of [...runtimes.keys()]) if (!orgs.data.orgs.some((o) => o.id === id)) stopRuntime(id);
+  if (!HOSTED) broadcastAll({ type: 'reload' });
+};
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     console.error(`\nThe dashboard is already running (port ${cfg.server.port} is in use).`);
@@ -760,6 +988,7 @@ server.on('error', (e) => {
 server.listen(cfg.server.port, cfg.server.host, async () => {
   console.log(`WAVS Dashboard running: http://localhost:${cfg.server.port}`);
   console.log(`  Organizations: ${orgs.list().map((o) => o.name).join(', ')}`);
+  if (HOSTED) { console.log(`  Website mode: sign-ups ${site.signups}${OWNER_EMAIL ? `, owner ${OWNER_EMAIL}` : ''}`); return; }
   await startLocalName(dataDir);
   // http://wavs.local without ":8080" when port 80 is free (allowed for normal users on macOS).
   if (cfg.server.port !== 80) {
@@ -769,7 +998,7 @@ server.listen(cfg.server.port, cfg.server.host, async () => {
   }
   if (localName.active) console.log(`  On this network: http://${localName.host}${localName.port80 || cfg.server.port === 80 ? '' : `:${cfg.server.port}`}`);
 });
-if (tlsPort) {
+if (tlsPort && !HOSTED) {
   tlsOptions().then((opts) => {
     const secure = https.createServer(opts, app);
     secure.on('upgrade', upgrade);
@@ -783,7 +1012,7 @@ if (tlsPort) {
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {
-    rt?.stop();
+    for (const id of [...runtimes.keys()]) stopRuntime(id);
     auth.flush();
     tunnel.stop();
     stopLocalName();
