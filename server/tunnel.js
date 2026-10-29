@@ -120,23 +120,33 @@ export class Tunnel extends EventEmitter {
       if (!this.enabled) return;
       this.set({ status: 'starting', url: null, error: null });
       const named = this.conf.mode === 'named' && this.conf.token;
+      // http2 runs over normal https (TCP 443). cloudflared's default (QUIC, UDP 7844) is blocked
+      // on many church, venue and guest networks, which leaves a link that never connects.
       const args = named
-        ? ['tunnel', '--no-autoupdate', 'run', '--token', this.conf.token]
-        : ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${this.port}`];
+        ? ['tunnel', '--no-autoupdate', '--protocol', 'http2', 'run', '--token', this.conf.token]
+        : ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', `http://127.0.0.1:${this.port}`];
       const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       this.proc = proc;
       let log = '';
+      // A quick tunnel prints its address before it's connected; it only works (and its address
+      // only exists) once Cloudflare registers the connection. Opening it earlier fails, and the
+      // computer may then remember "no such address" for a while. So it's "on" only after that.
+      let address = named ? `https://${this.conf.hostname}` : null;
+      clearTimeout(this.slow);
+      this.slow = setTimeout(() => {
+        if (this.proc === proc && this.state.status !== 'on') {
+          this.set({ status: 'error', error: 'Cloudflare isn\'t answering from this network yet (still trying). If it stays like this, the network may block it: try another network or a phone hotspot.' });
+        }
+      }, 45000);
       const onData = (chunk) => {
         const text = chunk.toString();
         log = (log + text).slice(-2000);
-        if (named && /Registered tunnel connection/i.test(text) && this.state.status !== 'on') {
-          this.set({ status: 'on', url: `https://${this.conf.hostname}`, error: null });
-          console.log(`  Off-site: https://${this.conf.hostname}`);
-        }
         const m = !named && text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-        if (m && this.state.url !== m[0]) {
-          this.set({ status: 'on', url: m[0], error: null });
-          console.log(`  Comms off-site: ${m[0]}/comms`);
+        if (m) address = m[0];
+        if (address && /Registered tunnel connection/i.test(text) && (this.state.status !== 'on' || this.state.url !== address)) {
+          clearTimeout(this.slow);
+          this.set({ status: 'on', url: address, error: null });
+          console.log(`  ${named ? 'Off-site' : 'Comms off-site'}: ${address}${named ? '' : '/comms'}`);
         }
       };
       proc.stdout.on('data', onData);
@@ -144,6 +154,7 @@ export class Tunnel extends EventEmitter {
       proc.on('error', (e) => this.set({ status: 'error', error: e.message }));
       proc.on('exit', (code) => {
         this.proc = null;
+        clearTimeout(this.slow);
         if (!this.enabled) return;
         const why = log.split('\n').reverse().find((l) => /ERR|error|failed/i.test(l)) || `cloudflared stopped (code ${code})`;
         this.set({ status: 'error', url: null, error: why.replace(/^\S+\s+(ERR|INF|WRN)\s+/, '').slice(0, 200) });
@@ -157,6 +168,7 @@ export class Tunnel extends EventEmitter {
 
   stop() {
     clearTimeout(this.retry);
+    clearTimeout(this.slow);
     if (this.proc) { const p = this.proc; this.proc = null; p.removeAllListeners('exit'); p.kill(); }
     this.set({ url: null, status: this.enabled ? 'starting' : 'off' });
   }
