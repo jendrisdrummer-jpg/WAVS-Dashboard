@@ -51,6 +51,8 @@ export class FileDocs extends EventEmitter {
     super();
     this.root = path.resolve(root);
     this.kind = 'files';
+    this.watchers = new Map(); // key -> Set(fn)
+    this.setMaxListeners(0);
   }
 
   file(key) { return path.join(this.root, ...cleanKey(key).split('/')); }
@@ -69,6 +71,7 @@ export class FileDocs extends EventEmitter {
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(`${f}.tmp`, JSON.stringify(data, null, 2), secret ? { mode: 0o600 } : undefined);
     fs.renameSync(`${f}.tmp`, f);
+    this.emit('written', { key: cleanKey(key) });
   }
 
   /** Every document and file whose key starts with prefix ("orgs/grace/"). */
@@ -91,6 +94,7 @@ export class FileDocs extends EventEmitter {
   remove(prefix) {
     const p = cleanKey(prefix).replace(/\/+$/, '');
     fs.rmSync(this.file(p), { recursive: true, force: true });
+    this.emit('written', { prefix: p, removed: true });
   }
 
   async getFile(key) {
@@ -101,11 +105,30 @@ export class FileDocs extends EventEmitter {
     const f = this.file(key);
     await fs.promises.mkdir(path.dirname(f), { recursive: true });
     await fs.promises.writeFile(f, data);
+    this.emit('fileWritten', { key: cleanKey(key), info: { type: typeFor(key), size: data.length } });
   }
 
-  async removeFile(key) { await fs.promises.rm(this.file(key), { force: true }); }
+  async removeFile(key) {
+    await fs.promises.rm(this.file(key), { force: true });
+    this.emit('fileWritten', { key: cleanKey(key), info: null });
+  }
 
-  watch() { return () => {}; }
+  watch(key, fn) {
+    const k = cleanKey(key);
+    if (!this.watchers.has(k)) this.watchers.set(k, new Set());
+    this.watchers.get(k).add(fn);
+    return () => this.watchers.get(k)?.delete(fn);
+  }
+
+  /** Tell this document's stores it changed (e.g. a base station saved it). */
+  tell(key) {
+    for (const fn of [...(this.watchers.get(key) || [])]) {
+      try { fn(this.get(key)); } catch (e) { console.error(`[data] ${key}: ${e.message}`); }
+    }
+  }
+
+  /** Save a change that came from elsewhere (a base station): stores reload as if another computer changed it. */
+  apply(key, data) { this.put(key, data); this.tell(cleanKey(key)); }
   async flush() {}
   async close() {}
   status() { return { kind: 'files', where: this.root, pending: 0, error: null }; }
@@ -259,7 +282,11 @@ export class MongoDocs extends EventEmitter {
     this.latest.set(k, json);
     this.saveMirror();
     this.kick();
+    this.emit('written', { key: k });
   }
+
+  /** Save a change that came from elsewhere (a base station): stores reload as if another computer changed it. */
+  apply(key, data) { this.put(key, data); this.tell(cleanKey(key)); }
 
   list(prefix = '') {
     return [...new Set([...this.cache.keys(), ...this.fileIndex.keys()])].filter((k) => k.startsWith(prefix)).sort();
@@ -272,6 +299,7 @@ export class MongoDocs extends EventEmitter {
     for (const k of [...this.fileIndex.keys()]) if (hit(k)) { this.fileIndex.delete(k); this.dropCached(k); }
     if (this.mirrorDir) fs.rmSync(this.mirrorPhoto(p), { recursive: true, force: true });
     this.saveMirror();
+    this.emit('written', { prefix: p, removed: true });
     return this.enqueue({ op: 'remove', prefix: p }).catch((e) => console.error(`[data] couldn't delete ${p}: ${e.message}`));
   }
 
@@ -322,6 +350,7 @@ export class MongoDocs extends EventEmitter {
     this.dropCached(k);
     this.keepPhoto(k, buf);
     this.saveMirror();
+    this.emit('fileWritten', { key: k, info: { type, size: buf.length } });
     const saved = this.enqueue({ op: 'putFile', key: k, data: buf, type });
     // Offline, the upload counts as done once it's on this computer.
     return this.offline && this.mirrorDir ? (saved.catch(() => {}), Promise.resolve()) : saved;
@@ -333,6 +362,7 @@ export class MongoDocs extends EventEmitter {
     this.dropCached(k);
     if (this.mirrorDir) fs.promises.rm(this.mirrorPhoto(k), { force: true }).catch(() => {});
     this.saveMirror();
+    this.emit('fileWritten', { key: k, info: null });
     const done = this.enqueue({ op: 'removeFile', key: k });
     return this.offline ? (done.catch(() => {}), Promise.resolve()) : done;
   }
@@ -428,7 +458,7 @@ export class MongoDocs extends EventEmitter {
 
   tell(key) {
     this.emit('external', key);
-    for (const fn of this.watchers.get(key) || []) {
+    for (const fn of [...(this.watchers.get(key) || [])]) {
       try { fn(this.get(key)); } catch (e) { console.error(`[data] ${key}: ${e.message}`); }
     }
   }

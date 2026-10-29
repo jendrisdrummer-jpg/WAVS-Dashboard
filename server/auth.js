@@ -21,13 +21,13 @@ const str = (v, max = 80) => String(v ?? '').trim().slice(0, max);
 const key = (username) => str(username).toLowerCase();
 const sha = (v) => crypto.createHash('sha256').update(v).digest('hex');
 
-function hashPassword(password) {
+export function hashPassword(password) {
   const salt = crypto.randomBytes(16);
   const hash = crypto.scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 });
   return `scrypt$${salt.toString('base64')}$${hash.toString('base64')}`;
 }
 
-function checkPassword(stored, password) {
+export function checkPassword(stored, password) {
   const [kind, salt, hash] = String(stored || '').split('$');
   if (kind !== 'scrypt') return false;
   const want = Buffer.from(hash, 'base64');
@@ -229,6 +229,17 @@ export class Auth {
     const f = this.failures.get(ip);
     const now = Date.now();
     this.failures.set(ip, f && now - f.at < 10 * 60000 ? { n: f.n + 1, at: f.at } : { n: 1, at: now });
+  }
+
+  /** The account for a correct username + password (no session), with the same "too many tries" limit. */
+  check(username, password, ip = '') {
+    if (this.tooMany(ip)) throw new Error('Too many wrong tries. Wait 10 minutes and try again.');
+    const u = this.byName(username);
+    if (!u || !checkPassword(u.pass, password)) {
+      this.failed(ip);
+      throw new Error('That email/username or password is not right');
+    }
+    return u;
   }
 
   /** Returns a session token for a correct username + password. */

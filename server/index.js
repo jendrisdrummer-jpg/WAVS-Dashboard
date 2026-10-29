@@ -23,6 +23,7 @@ import { openDocs, FileDocs, MongoDocs, databaseConfig, saveDatabaseConfig, copy
 import { System } from './system.js';
 import { Site } from './site.js';
 import { Mailer, resetEmail } from './mail.js';
+import { StationHub, StationLink, StationDocs, StationAuth, stationConfig, saveStationConfig } from './station.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
 // Planning Center) is per organization and edited in the browser. On first run the
@@ -38,6 +39,8 @@ if (!process.env.WAVS_DATA && !HOSTED) {
   if (from) console.log(`[data] copied your existing setup from ${from}`);
 }
 console.log(`[data] saved in ${dataDir}`);
+// A base station: this computer is linked to the website (Settings → This computer → Website).
+const STATION = HOSTED ? null : stationConfig(dataDir);
 // Running in the background: keep the log file from growing forever.
 if (process.env.WAVS_SERVICE === '1') {
   const log = path.join(dataDir, 'logs', 'dashboard.log');
@@ -48,8 +51,16 @@ const BOOT = crypto.randomUUID(); // changes on every start, so open screens can
 // Where the setup is saved: this computer's folder, or a cloud database (Settings → This computer).
 let docs;
 let storageProblem = null;
+let link = null;
 try {
-  docs = await openDocs(dataDir, { hosted: HOSTED, dbName: HOSTED ? 'wavs-web' : undefined });
+  if (STATION) {
+    // Organizations and accounts come from the website; a copy stays here for when it's offline.
+    link = new StationLink(STATION);
+    docs = new StationDocs({ dir: path.join(dataDir, 'station'), link });
+    docs.load();
+    link.start();
+    console.log(`[station] base station for ${STATION.url} (${STATION.user?.username || 'linked'})`);
+  } else docs = await openDocs(dataDir, { hosted: HOSTED, dbName: HOSTED ? 'wavs-web' : undefined });
 } catch (e) {
   // The website never falls back to its temporary disk: stop, and the host starts it again.
   if (HOSTED) { console.error(`[data] can't open the database: ${e.message}`); process.exit(1); }
@@ -61,9 +72,11 @@ try {
 }
 if (docs.kind === 'mongodb') console.log(`[data] using MongoDB at ${docs.host} (database "${docs.db.databaseName}")`);
 else if (HOSTED) console.warn('[data] WAVS_HOSTED without MONGODB_URI: saving to this server\'s disk (fine for trying it out, lost on most hosts when it restarts)');
-const orgs = new OrgRegistry({ docs }, { local: FileDocs.at(dataDir) });
-if (!HOSTED) await orgs.migrate(cfg);
-const auth = new Auth({ docs });
+const orgs = new OrgRegistry({ docs }, { local: STATION ? docs.local : FileDocs.at(dataDir) });
+if (!HOSTED && !STATION) await orgs.migrate(cfg);
+const auth = STATION ? new StationAuth({ docs: docs.local }, { link, docs }) : new Auth({ docs });
+// The website: base stations (laptops at events) link to it.
+const stations = HOSTED ? new StationHub({ docs, auth, orgs }) : null;
 const site = new Site({ docs });
 const mailer = new Mailer();
 if (mailer.enabled) console.log(`[mail] sending email as ${mailer.config.from}`);
@@ -135,7 +148,7 @@ function switchActive(id) {
 }
 
 // Accounts are always on for the website; on a host computer once the first one exists.
-const accountsOn = () => HOSTED || auth.enabled;
+const accountsOn = () => HOSTED || Boolean(STATION) || auth.enabled;
 const loginRequired = () => HOSTED || Boolean(auth.data.requireLogin);
 const myOrgs = (user) => orgs.data.orgs.filter((o) => (HOSTED ? auth.rank(user, o.id) >= 1 && (!user?.owner || auth.memberOf(user, o.id)) : true));
 
@@ -177,6 +190,7 @@ function publicConfig(req) {
   const user = req.user ? auth.view(req.user, rt?.orgId) : null;
   const common = {
     hosted: HOSTED,
+    station: STATION ? { url: STATION.url, online: link.online, name: STATION.name } : null,
     site: HOSTED ? { name: site.name, owner: Boolean(req.user?.owner), canCreateOrg: Boolean(req.user) } : null,
     orgs: req.user || !HOSTED ? myOrgs(req.user).map((o) => ({ id: o.id, name: o.name, color: orgs.read(o.id).org.theme.accent })) : [],
   };
@@ -265,7 +279,7 @@ const need = (role) => (req, res, next) => {
 // "Require sign-in to view" (always on the website): everything except the sign-in pages,
 // static files and the comms phone page (crew sign in to comms with their name) needs a
 // signed-in account. A TV link may look (GET), not change anything.
-const PUBLIC = /^\/(login|join\/|signup$|forgot$|reset\/|api\/auth\/|css\/|js\/|vendor\/|logo$|comms$|api\/comms\/qr\.svg$|favicon|tv\/)/;
+const PUBLIC = /^\/(login|join\/|signup$|api\/station\/(pair|import)$|forgot$|reset\/|api\/auth\/|css\/|js\/|vendor\/|logo$|comms$|api\/comms\/qr\.svg$|favicon|tv\/)/;
 const TV_CAN_READ = /^\/(api\/(config|state|dashboards|schedule|service|settings)$|uploads\/|d\/|dashboards$)/;
 app.use((req, res, next) => {
   if (!accountsOn() || !loginRequired() || PUBLIC.test(req.path)) return next();
@@ -276,11 +290,20 @@ app.use((req, res, next) => {
 });
 
 // Everything else is about one organization: there must be one.
-const NO_ORG_OK = /^\/api\/(config|auth\/|orgs$|site(\/|$)|comms\/qr\.svg$)/;
+const NO_ORG_OK = /^\/api\/(config|auth\/|orgs$|site(\/|$)|comms\/qr\.svg$|stations?(\/|$))/;
 app.use((req, res, next) => {
   if (req.rt || !/^\/(api\/|uploads\/|logo$)/.test(req.path) || NO_ORG_OK.test(req.path)) return next();
   res.status(req.user ? 409 : 401).json(req.user ? { error: 'Create an organization first', noOrg: true } : { error: 'Sign in first', login: true });
 });
+
+// A base station: accounts and organizations are managed on the website.
+const ON_WEBSITE = /^\/api\/(users\/|auth\/(owner|invite\/|forgot|reset\/|password)|orgs\/[^/]+$|backup\/import|system\/database)/;
+app.use((req, res, next) => {
+  if (!STATION || req.method === 'GET' || !ON_WEBSITE.test(req.path)) return next();
+  if (req.path === '/api/orgs' || req.path === '/api/orgs/active') return next();
+  res.status(400).json({ error: `This computer is a base station for ${STATION.url}. Do that on the website.`, website: STATION.url });
+});
+app.use((req, res, next) => (STATION && req.method === 'POST' && req.path === '/api/orgs' ? res.status(400).json({ error: `Create organizations on the website (${STATION.url}); they show up here by themselves.` }) : next()));
 
 // The website: things that only make sense on a computer at the venue.
 const HOST_ONLY = /^\/api\/(system|remote|comms\/remote|auth\/require-login|pin\/check)(\/|$)/;
@@ -368,8 +391,8 @@ app.post('/api/auth/owner', wrap((req, res) => {
   signIn(req, res, auth.startSession(u));
   res.json({ ok: true });
 }));
-app.post('/api/auth/login', wrap((req, res) => {
-  signIn(req, res, auth.login(req.body?.username, req.body?.password, clientIp(req)));
+app.post('/api/auth/login', wrap(async (req, res) => {
+  signIn(req, res, await auth.login(req.body?.username, req.body?.password, clientIp(req)));
   res.json({ ok: true });
 }));
 app.post('/api/auth/logout', (req, res) => { auth.logout(sessionToken(req)); signIn(req, res, null); res.json({ ok: true }); });
@@ -583,6 +606,72 @@ app.post('/api/backup', need('admin'), wrap(async (req, res) => {
   const file = `WAVS ${names} ${new Date().toISOString().slice(0, 10)}.wavsbackup`.replace(/[^\w .+-]/g, '');
   res.set({ 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${file}"` }).send(buf);
 }));
+// ---- base stations
+const bearer = (req) => /^Bearer\s+(.+)$/i.exec(req.get('authorization') || '')?.[1] || null;
+if (HOSTED) {
+  // A laptop links itself with a website account (email + password); it gets a token.
+  app.post('/api/station/pair', wrap((req, res) => {
+    res.json(stations.pair({ username: req.body?.username, password: req.body?.password, name: req.body?.name, ip: clientIp(req) }));
+  }));
+  // While linking: bring that laptop's own organizations to the website (as new ones it runs).
+  app.post('/api/station/import', express.raw({ type: '*/*', limit: '200mb' }), wrap(async (req, res) => {
+    const st = stations.byToken(bearer(req));
+    if (!st) return res.status(401).json({ error: 'Link this computer first' });
+    const data = readBackup(req.body);
+    const choices = Object.fromEntries(data.orgs.map((o) => [o.id, 'new']));
+    const result = await importBackup({ data, orgs, auth, choices, withUsers: false });
+    for (const r of result.imported) auth.join(st.userId, r.id, 'admin');
+    stations.sendOrgs();
+    res.json(result);
+  }));
+  app.get('/api/stations', wrap((req, res) => {
+    if (!req.user) throw new Error('Sign in first');
+    res.json({ stations: stations.list(req.user.id), here: req.rt ? stations.connectedFor(req.rt.orgId) : [] });
+  }));
+  app.delete('/api/stations/:id', wrap((req, res) => {
+    if (!req.user) throw new Error('Sign in first');
+    stations.remove(req.user.id, req.params.id);
+    res.json({ ok: true });
+  }));
+} else {
+  // This computer as a base station: status, link, unlink.
+  app.get('/api/station', need('admin'), (_req, res) => res.json(STATION
+    ? { linked: true, url: STATION.url, name: STATION.name, user: STATION.user, ...docs.status(), orgs: docs.orgList }
+    : { linked: false, orgs: orgs.data.orgs.map((o) => ({ id: o.id, name: o.name })) }));
+  app.post('/api/station/link', need('admin'), wrap(async (req, res) => {
+    if (STATION) throw new Error('This computer is already linked');
+    if (accountsOn() && !req.user?.owner) throw new Error('Only the owner can link this computer');
+    let url = String(req.body?.url || '').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//.test(url)) url = `https://${url}`;
+    if (!/^https?:\/\/[\w.-]+(:\d+)?$/.test(url)) throw new Error('Enter the website\'s address, e.g. https://wavs-dashboard.onrender.com');
+    const ask = async (pathname, init) => {
+      let r;
+      try { r = await fetch(`${url}${pathname}`, { ...init, signal: AbortSignal.timeout(60000) }); } catch { throw new Error(`Couldn't reach ${url}. Check the address and this computer's internet.`); }
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || `The website answered ${r.status}`);
+      return body;
+    };
+    const paired = await ask('/api/station/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: req.body?.username, password: req.body?.password, name: req.body?.name || os.hostname() }) });
+    let imported = [];
+    const upload = (Array.isArray(req.body?.upload) ? req.body.upload : []).map(String).filter((id) => orgs.data.orgs.some((o) => o.id === id));
+    if (upload.length) {
+      const buf = await createBackup({ orgs, auth, orgIds: upload });
+      imported = (await ask('/api/station/import', { method: 'POST', headers: { authorization: `Bearer ${paired.token}`, 'content-type': 'application/octet-stream' }, body: buf })).imported;
+    }
+    saveStationConfig(dataDir, { url, token: paired.token, name: paired.station.name, user: paired.user, linkedAt: new Date().toISOString() });
+    console.log(`[station] linked to ${url} as ${paired.user.username}`);
+    res.json({ ok: true, user: paired.user, imported, restarting: system.restartSoon() });
+  }));
+}
+// Unlink: an admin, or (with no organization to sign in to yet) anyone on this computer itself.
+const unlinkAllowed = (req, res, next) => (STATION && !orgs.data.orgs.length && thisComputer(req.socket.remoteAddress) ? next() : need('admin')(req, res, next));
+app.delete('/api/station', unlinkAllowed, wrap(async (_req, res) => {
+  if (!STATION) throw new Error('This computer isn\'t linked');
+  saveStationConfig(dataDir, null);
+  console.log('[station] unlinked; back to this computer\'s own setup');
+  res.json({ ok: true, restarting: system.restartSoon() });
+}));
+
 const pendingImports = new Map(); // token -> { buf, at }
 const rawBody = express.raw({ type: '*/*', limit: '1gb' });
 app.post('/api/backup/inspect', need('admin'), rawBody, wrap((req, res) => {
@@ -938,10 +1027,17 @@ app.use(express.static(pub));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true }); // dashboards
 const commsWss = new WebSocketServer({ noServer: true }); // phones, comms engine, comms control
+const stationWss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024 }); // base stations (website)
 commsWss.on('connection', (ws, req) => { ws.orgId = req.rt.orgId; req.rt.comms.attach(ws, req); });
 
 function upgrade(req, socket, head) {
   req.viaTunnel = Boolean(req.viaTunnel);
+  if (HOSTED && req.url.startsWith('/station-ws')) {
+    const st = stations.byToken(/^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1]);
+    if (!st) { socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return; }
+    stationWss.handleUpgrade(req, socket, head, (ws) => stations.attach(ws, st));
+    return;
+  }
   req.user = auth.session(sessionToken(req));
   const { pathname } = new URL(req.url, 'http://x');
   req.tv = !req.user && HOSTED ? tvViewer(req) : null;
@@ -1032,8 +1128,13 @@ if (!HOSTED) runtimeFor(activeId());
 // Organizations added, renamed or removed elsewhere.
 orgs.onChange = () => {
   for (const id of [...runtimes.keys()]) if (!orgs.data.orgs.some((o) => o.id === id)) stopRuntime(id);
+  // A base station's first sync (or a new organization on the website): run one.
+  if (!HOSTED && !runtimes.size) runtimeFor(activeId());
   if (!HOSTED) broadcastAll({ type: 'reload' });
 };
+// A base station tells open screens when it goes on or offline (the header shows it).
+link?.on('online', () => broadcastAll({ type: 'station', online: true }));
+link?.on('offline', () => broadcastAll({ type: 'station', online: false }));
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     console.error(`\nThe dashboard is already running (port ${cfg.server.port} is in use).`);
