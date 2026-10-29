@@ -27,6 +27,7 @@
     "mongodb": "^7.7.0",
     "multer": "^2.0.0",
     "multicast-dns": "^7.2.5",
+    "nodemailer": "^10.3.1",
     "qrcode": "^1.5.4",
     "selfsigned": "^5.5.0",
     "ws": "^8.18.0",

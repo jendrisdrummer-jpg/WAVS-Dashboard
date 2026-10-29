@@ -17,3 +17,7 @@ services:
         sync: false
       - key: WAVS_OWNER_EMAIL # your email: signing up with it makes you the site owner
         sync: false
+      - key: GMAIL_USER # optional: password reset emails (docs/HOSTING.md)
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false

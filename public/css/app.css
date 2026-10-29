@@ -1207,3 +1207,4 @@ body.as-lead .lead-only-hide { display: none !important; }
 .site-code { font-size: 20px; letter-spacing: 2px; font-weight: 700; }
 .site-orgs { margin: 6px 0 0; padding-left: 18px; }
 .hosted-note { border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; font-size: 14px; }
+.auth-forgot { justify-self: center; color: var(--text-2); }
