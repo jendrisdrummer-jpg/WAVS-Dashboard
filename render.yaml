@@ -4,7 +4,7 @@ services:
   - type: web
     name: wavs-dashboard
     runtime: node
-    plan: free # sleeps after 15 minutes without visitors; "starter" ($7/month) stays on
+    plan: starter # $7/month, always on. "free" also works but sleeps after 15 minutes without visitors
     buildCommand: npm ci --omit=dev
     startCommand: node server/index.js
     healthCheckPath: /api/auth/status
