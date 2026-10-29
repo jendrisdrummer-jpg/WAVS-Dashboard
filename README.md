@@ -518,6 +518,11 @@ with the free MongoDB Atlas database. Step-by-step: [docs/HOSTING.md](docs/HOSTI
 - TV links carry a key so TVs don't sign in. Comms join links name the organization.
 - The website can't reach gear on a venue's network yet: the venue computer program comes next.
 
+**Base station (events).** Link a laptop to the website (Settings → This computer → Website) and it
+uses the website's accounts and organizations, runs the gear and the in-room screens, and keeps
+working without internet, syncing when it's back. See
+[docs/HOSTING.md](docs/HOSTING.md#your-laptop-as-a-base-station-events).
+
 ## Running it permanently
 
 The installer above sets the dashboard up as a background service:

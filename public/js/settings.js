@@ -155,6 +155,12 @@ if (!cfg.auth?.enabled) {
 }
 
 async function drawAccounts() {
+  if (cfg.station) {
+    // A base station uses the website's accounts.
+    acct.innerHTML = `<p>People sign in here with their <b>website accounts</b>. Invite your team, change roles and reset passwords on <a href="${esc(cfg.station.url)}/settings#accounts" target="_blank">the website</a>; it updates here by itself.</p>
+      <small class="muted">Offline, people who have signed in on this computer before can still sign in.</small>`;
+    return;
+  }
   let d;
   try { d = await api('GET', '/api/users'); } catch (err) { acct.innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
   const me = cfg.auth.user;
@@ -253,6 +259,7 @@ let upd = null;
 async function drawComputer() {
   try { sys = await api('GET', '/api/system'); } catch (err) { comp.innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
   try { db = await api('GET', '/api/system/database'); } catch { db = null; }
+  try { station = await api('GET', '/api/station'); } catch { station = null; }
   const svc = sys.service;
   const mac = svc.platform === 'darwin';
   comp.innerHTML = `
@@ -273,7 +280,8 @@ async function drawComputer() {
         <div>${sys.commit ? `<span class="mono">${esc(sys.commit)}</span> · ${esc(sys.date)}` : esc(sys.version)}</div></div>
     </div>
     <div class="sys-offsite" id="offsite">${offsiteBlock()}</div>
-    <div class="sys-cloud" id="cloud-db">${cloudBlock()}</div>
+    <div class="sys-cloud" id="station-block">${stationBlock()}</div>
+    ${station?.linked ? '' : `<div class="sys-cloud" id="cloud-db">${cloudBlock()}</div>`}
     <div class="sys-update">
       ${!sys.git ? `<p class="muted small">This copy was downloaded as a ZIP, so it can't update itself. Install it with git (see the README) to get the <b>Update now</b> button.</p>`
         : `<div class="row-btns"><button class="btn" id="check-upd" type="button">Check for updates</button>
@@ -282,6 +290,73 @@ async function drawComputer() {
     </div>
     <p class="muted small">${sys.storage?.kind === 'mongodb' ? 'This computer\'s own files (and its copy of the cloud database) are' : 'Your setup is saved'} in <span class="mono">${esc(sys.dataDir)}</span>. Updating never touches it.</p>`;
 }
+
+// ---- base station: this computer linked to the website (one home for accounts and data)
+let station = null;
+let stationBusy = '';
+const ago = (iso) => {
+  if (!iso) return 'not yet';
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(iso).toLocaleDateString();
+};
+
+function stationBlock() {
+  if (!station) return '';
+  if (station.linked) {
+    const s = station;
+    return `<div class="off-head"><b>Website</b> <span class="chip ${s.online ? 'good' : 'bad'}">${s.online ? 'Connected' : 'Offline'}</span></div>
+      <div>This computer is a <b>base station</b> for <a href="${esc(s.url)}" target="_blank">${esc(s.url)}</a>, linked as ${esc(s.user?.name || '')} (${esc(s.user?.username || '')}). Accounts, organizations, people, schedules and dashboards come from the website, and changes go both ways.</div>
+      <small class="muted">${s.online ? `Last synced ${ago(s.lastSync)}.` : 'No internet? The event carries on from this computer\'s copy, and changes are sent when it\'s back.'}
+        ${s.pending ? ` <b>${s.pending} change${s.pending > 1 ? 's' : ''} waiting to be sent.</b>` : ''}
+        Organizations here: ${s.orgs.length ? s.orgs.map((o) => esc(o.name)).join(', ') : 'none yet'} (the ones your account is an admin of).</small>
+      ${s.error ? `<small class="over">${esc(s.error)}</small>` : ''}
+      <small class="muted">People sign in with their website accounts. Manage accounts, invites and organizations on the website.</small>
+      <div class="row-btns"><a class="btn small" href="${esc(s.url)}" target="_blank">Open the website</a><button class="btn small" type="button" data-station-unlink ${stationBusy ? 'disabled' : ''}>Unlink this computer…</button></div>`;
+  }
+  return `<div class="off-head"><b>Website</b> <span class="chip">Not linked</span></div>
+    <div class="small muted">Using the dashboard website (e.g. <span class="mono">wavs-dashboard.onrender.com</span>)? Link this computer to it as a <b>base station</b>: one account and the same organizations everywhere. This computer still runs the gear and the screens at the event, and keeps going without internet.</div>
+    <details class="off-own"><summary>Link to your website</summary>
+      <form class="form" id="station-form">
+        <label class="f"><span>Website address</span><input type="text" name="url" placeholder="https://wavs-dashboard.onrender.com" required autocapitalize="off" spellcheck="false"></label>
+        <div class="f-row">
+          <label class="f"><span>Your website email</span><input type="email" name="username" required autocomplete="username"></label>
+          <label class="f"><span>Password</span><input type="password" name="password" required autocomplete="current-password"></label>
+        </div>
+        <label class="f"><span>Name for this computer</span><input type="text" name="name" maxlength="60" placeholder="e.g. Jon's MacBook"></label>
+        ${station.orgs.length ? `<div class="f"><span>Bring this computer's setup to the website</span>
+          ${station.orgs.map((o) => `<label class="cb"><input type="checkbox" name="upload" value="${esc(o.id)}"> Upload <b>${esc(o.name)}</b> (people, photos, dashboards, schedules, gear)</label>`).join('')}
+          <small class="muted">Tick the ones that aren't on the website yet; each arrives as a new organization you're the admin of. Already there? Leave it unticked to avoid a duplicate. Accounts aren't uploaded: your team signs in with website accounts.</small></div>` : ''}
+        <div class="row-btns"><button class="btn small primary" ${stationBusy ? 'disabled' : ''}>${stationBusy || 'Link this computer'}</button></div>
+        <small class="muted">This computer's own setup stays here, untouched; unlinking goes back to it.</small>
+      </form></details>`;
+}
+
+function redrawStation() {
+  const el = document.getElementById('station-block');
+  if (el) el.innerHTML = stationBlock();
+}
+
+comp.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'station-form') return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const body = { url: f.get('url'), username: f.get('username'), password: f.get('password'), name: f.get('name'), upload: f.getAll('upload') };
+  stationBusy = body.upload.length ? 'Linking and uploading…' : 'Linking…';
+  redrawStation();
+  try {
+    const r = await api('POST', '/api/station/link', body);
+    stationBusy = '';
+    const up = r.imported?.length ? ` Uploaded ${r.imported.map((i) => i.name).join(', ')}.` : '';
+    await afterSwitch(r, `Linked to the website as ${r.user.name}.${up}`);
+  } catch (err) { stationBusy = ''; toast(err.message, true); redrawStation(); }
+});
+comp.addEventListener('click', async (e) => {
+  if (!e.target.closest('[data-station-unlink]')) return;
+  if (!await confirmBox('Unlink this computer from the website? It goes back to its own setup and accounts from before it was linked. The website keeps everything. (The dashboard restarts.)', { title: 'Unlink', ok: 'Unlink', danger: true })) return;
+  stationBusy = 'Unlinking…';
+  redrawStation();
+  try { await afterSwitch(await api('DELETE', '/api/station'), 'Unlinked.'); } catch (err) { stationBusy = ''; toast(err.message, true); redrawStation(); }
+});
 
 // ---- where everything is saved: this computer, or a cloud database (MongoDB Atlas)
 let db = null;
@@ -533,6 +608,27 @@ async function drawSite() {
     ${d.orgs.length ? `<details><summary class="small">Organizations</summary><ul class="site-orgs small">${d.orgs.map((o) => `<li>${esc(o.name)} <span class="muted">· ${o.people} on the team${o.running ? ' · open now' : ''}</span></li>`).join('')}</ul></details>` : ''}`;
   body.dataset.invite = `You're invited to try WAVS Dashboard. Create your account at ${link}${d.signups === 'code' ? ` with the beta code ${d.code}` : ''}.`;
 }
+// The website: base stations (laptops at events) linked with this account.
+async function drawStations() {
+  const el = document.getElementById('stations-body');
+  let d;
+  try { d = await api('GET', '/api/stations'); } catch (err) { el.innerHTML = `<p class="muted">${esc(err.message)}</p>`; return; }
+  el.innerHTML = `<p class="small muted">A <b>base station</b> is a computer at an event (e.g. your laptop) that runs the gear and the screens in the room, and works without internet. Link one from its own Settings → This computer → Website, with your website account.</p>
+    ${d.stations.length ? `<div class="org-list">${d.stations.map((s) => `<div class="org-row"><span class="org-dot" style="background:${s.online ? 'var(--good)' : 'var(--line)'}"></span><b>${esc(s.name)}</b>
+      <span class="chip ${s.online ? 'good' : ''}">${s.online ? 'Connected' : `Last seen ${esc(ago(s.lastSeen))}`}</span>
+      <button class="btn small danger" data-st-del="${esc(s.id)}">Remove</button></div>`).join('')}</div>` : '<p class="muted small">None linked yet.</p>'}`;
+}
+if (cfg.hosted) {
+  document.getElementById('stations').classList.remove('hidden');
+  drawStations();
+  setInterval(drawStations, 15000);
+  document.getElementById('stations-body').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-st-del]');
+    if (!b || !await confirmBox('Remove this base station? It stops syncing right away and keeps working only from its own copy until it\'s linked again.', { ok: 'Remove', danger: true })) return;
+    try { await api('DELETE', `/api/stations/${encodeURIComponent(b.dataset.stDel)}`); drawStations(); } catch (err) { toast(err.message, true); }
+  });
+}
+
 if (cfg.hosted && cfg.site?.owner) {
   document.getElementById('site').classList.remove('hidden');
   drawSite();

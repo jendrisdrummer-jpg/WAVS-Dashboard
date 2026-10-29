@@ -135,7 +135,7 @@ body.kiosk .topbar { display: none; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.danger { color: var(--critical); }
 .btn.small { padding: 3px 8px; font-size: 12px; }
-input[type=text], input[type=search], input[type=password], input[type=time], input[type=date], input[type=number], select, textarea {
+input[type=text], input[type=search], input[type=password], input[type=email], input[type=url], input[type=time], input[type=date], input[type=number], select, textarea {
   background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; min-width: 0;
 }
 input:focus, select:focus, textarea:focus, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1208,3 +1208,4 @@ body.as-lead .lead-only-hide { display: none !important; }
 .site-orgs { margin: 6px 0 0; padding-left: 18px; }
 .hosted-note { border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; font-size: 14px; }
 .auth-forgot { justify-self: center; color: var(--text-2); }
+.station-chip { text-decoration: none; white-space: nowrap; }

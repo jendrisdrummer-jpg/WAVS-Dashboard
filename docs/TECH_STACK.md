@@ -56,6 +56,7 @@ in a cloud database (MongoDB Atlas).
 | `server/hub.js` | Live device state, broadcast to screens |
 | `server/service.js` | Order of service and where we are in it (Planning Center, ProPresenter playlist, typed plans) |
 | `server/schedule.js` | Services planned ahead, events, repeating services, auto-switching, undo |
+| `server/station.js` | Base stations: pairing and syncing a laptop with the website (StationHub on the website; StationLink, StationDocs, StationAuth on the laptop) |
 | `server/docs.js` | Where everything is saved: the data folder or MongoDB (with a copy on this computer for when the internet drops), and moving between them |
 | `server/store.js` | People, photos, face positions, mic assignments |
 | `server/collab.js` | Dashboards (layouts) and shared notes/checklists |
@@ -127,9 +128,11 @@ Steps to a real website with accounts:
    data. An always-on host keeps WebSockets (live updates, comms), so no paid realtime service or
    rewrite is needed, which a serverless host like Vercel would require. See
    [HOSTING.md](HOSTING.md).
-3. **Installable venue agent** (Windows, macOS, Linux): the gear connections from `server/` as a
-   background program at each venue. It connects outbound (no router changes) and keeps the
-   venue's screens running on the local network if the internet drops.
+3. **Base stations** (in progress): a laptop at an event runs the dashboard as before (gear,
+   in-room screens, no internet needed) but linked to the website (`server/station.js`). It
+   signs in with a website account and keeps the website's organizations in sync both ways over
+   one outbound WebSocket (`/station-ws`), with a copy on the laptop for offline. Next: the
+   website shows the base station's live state.
 
 Gear can't be reached from the cloud, so a computer at the venue is always part of it.
 

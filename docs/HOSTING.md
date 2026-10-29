@@ -94,10 +94,43 @@ has an account, and it's limited to 5 an hour.
 `WAVS_RESET_OWNER_PASSWORD` with a new password and save; the site restarts with it. Sign in,
 then **delete that variable** and save again.
 
-## Bringing your own organization over from the laptop
+## Your laptop as a base station (events)
 
-On the laptop, open **Settings → Move to another computer → Download backup**. On the website,
-open **Settings → Move to another computer**, choose the file and import it. It arrives as a new
+For events, a laptop at the venue runs the gear (mics, ATEM, ProPresenter) and the screens in the
+room, and keeps going without internet. Link it to the website and it's **the same system**: one
+account, the same organizations, people, schedules and dashboards, with changes going both ways.
+
+1. On the laptop, open the dashboard (`http://localhost:8080`) → **Settings → This computer →
+   Website → Link to your website**.
+2. Enter the website's address (e.g. `https://wavs-dashboard.onrender.com`), your website email and
+   password, and a name for the laptop.
+3. **Bring this computer's setup to the website**: tick an organization that's only on the laptop
+   so far (people, photos, dashboards, schedules and gear go up as a new organization you're the
+   admin of). Already on the website? Leave it unticked.
+4. Click **Link this computer**. It restarts. If you started it from Terminal, start it again.
+
+From then on:
+- **One account.** People sign in at the laptop with their website accounts. Offline, anyone who
+  has signed in on that laptop before still can. Invites, roles and passwords are managed on the
+  website.
+- **The same data.** The laptop shows the organizations your account is an admin of. Edits on
+  either side show up on the other within a second or two.
+- **No internet at the venue?** The header shows *☁ Offline: working from this computer*.
+  Everything keeps working from the laptop's copy, and changes are sent when it's back. It even
+  starts up offline, once it has synced at least once.
+- **In the room**, TVs, the green room and crew phones use the laptop's address, as before
+  (`http://wavs.local`, or its IP).
+- The website's **Settings → Base stations** lists your linked laptops. **Remove** stops one
+  syncing.
+- **Unlink** (laptop: Settings → This computer → Website) puts the laptop back to its own setup
+  from before it was linked. The website keeps everything.
+
+Coming next: while the laptop runs an event, the website shows its live mics, tally and slides too.
+
+## Bringing an organization over without linking
+
+On the laptop, open **Settings → Move to another computer → Download backup**. On the website, open
+**Settings → Move to another computer**, choose the file and import it. It arrives as a new
 organization that you're the admin of. Accounts aren't brought over on the website; invite your
 team again from Settings.
 

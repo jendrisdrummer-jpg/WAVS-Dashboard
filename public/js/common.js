@@ -73,6 +73,20 @@ export async function start({ page }) {
 
 async function firstOrg() {
   document.body.innerHTML = '<main class="auth-page"></main>';
+  if (store.config.station) {
+    // A base station shows the website's organizations once it has reached the website.
+    document.body.innerHTML = `<main class="auth-page"><div class="auth-card"><h1>${store.config.station.online ? 'No organizations yet' : 'Connecting to the website…'}</h1>
+      <p class="muted">${store.config.station.online
+    ? `This account isn't an admin of any organization on <a href="${esc(store.config.station.url)}">${esc(store.config.station.url)}</a>. Create one there (or ask its admin), and it shows up here by itself.`
+    : `This computer is a base station for ${esc(store.config.station.url)}. Its organizations appear once it connects (the first time needs internet).`}</p>
+      <p class="small"><button class="btn small" id="unlink" type="button">Unlink this computer</button> <span class="muted">(back to its own setup)</span></p></div></main>`;
+    document.getElementById('unlink').onclick = async () => {
+      if (!await confirmBox('Unlink this computer from the website? It goes back to its own setup and accounts (the dashboard restarts).', { ok: 'Unlink', danger: true })) return;
+      try { await api('DELETE', '/api/station'); toast('Unlinked. Restart the dashboard if it doesn\'t come back by itself.'); } catch (err) { toast(err.message, true); }
+    };
+    setTimeout(() => location.reload(), 15000);
+    return;
+  }
   for (;;) {
     const r = await ask({
       title: `Welcome${store.config.auth?.user ? `, ${store.config.auth.user.name}` : ''}`,
@@ -107,6 +121,7 @@ function connect() {
         setAlerts(msg.alerts);
         break;
       case 'reload': if (!store.holdReload) location.reload(); return; // organization switched or gear changed
+      case 'station': if (store.config.station) store.config.station.online = msg.online; break; // base station: website reachable?
       case 'service': store.service = msg.service; break;
       case 'board': store.board = msg.board; break;
       case 'schedule': store.schedule = msg.schedule; break;
@@ -271,6 +286,7 @@ function renderHeader(page) {
       <div class="spacer"></div>
       <div data-slot-right class="slot"></div>
       ${accountChip()}
+      ${cfg.station ? `<a class="chip station-chip" data-station href="/settings#computer" title="This computer is a base station for ${esc(cfg.station.url)}"></a>` : ''}
       <span class="conn" data-conn>Offline</span>
       <span class="clock" data-clock></span>
     </div>
@@ -302,6 +318,11 @@ function renderHeader(page) {
     const conn = header.querySelector('[data-conn]');
     conn.classList.toggle('ok', store.connected);
     conn.textContent = store.connected ? 'Live' : 'Reconnecting…';
+    const st = header.querySelector('[data-station]');
+    if (st) {
+      st.classList.toggle('good', cfg.station.online);
+      st.textContent = cfg.station.online ? '☁ Synced' : '☁ Offline: working from this computer';
+    }
     header.querySelector('[data-service]').textContent = store.greenroom.service?.name || cfg.org.serviceName || '';
   });
 }
