@@ -506,8 +506,8 @@ Forgotten password: an admin clicks **Reset password** and passes on the tempora
 ## On the web (accounts for everyone)
 
 The dashboard can also run as a website where anyone you invite signs up and gets their own
-organization (beta testers, other churches). It costs $0 to start on Render's free plan with
-MongoDB Atlas. Step-by-step: [docs/HOSTING.md](docs/HOSTING.md).
+organization (beta testers, other churches). It runs on Render's Starter plan ($7/month, always on)
+with the free MongoDB Atlas database. Step-by-step: [docs/HOSTING.md](docs/HOSTING.md).
 - **Website mode** is `WAVS_HOSTED=1`.
 - Every organization runs at the same time, and teams only see their own data.
 - **Website sign-ups** in Settings lets the site owner choose open, beta code or closed.

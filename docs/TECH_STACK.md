@@ -122,7 +122,7 @@ Plain HTML, CSS and JavaScript (ES modules), served as-is. No framework, no bund
 Steps to a real website with accounts:
 1. **Storage in MongoDB** (done): the setup can live in MongoDB Atlas instead of one computer's folder.
 2. **The website** (done): the same server in website mode (`WAVS_HOSTED=1`) on an always-on Node
-   host (Render's free plan to start; `render.yaml`, `Dockerfile`), on MongoDB. Anyone invited signs
+   host (Render Starter, $7/month; `render.yaml`, `Dockerfile`), on MongoDB. Anyone invited signs
    up with their own organization, every organization runs at once, and teams only see their own
    data. An always-on host keeps WebSockets (live updates, comms), so no paid realtime service or
    rewrite is needed, which a serverless host like Vercel would require. See

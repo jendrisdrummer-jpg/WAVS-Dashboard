@@ -4,10 +4,10 @@ This runs the dashboard as a website (for example `https://wavs-dashboard.onrend
 domain). Anyone you invite can create an account, and each account gets its own organization.
 Teams can't see each other's data. You're the **site owner**: you choose who can sign up.
 
-**What it costs:** $0 to start. Render's free plan plus the free MongoDB Atlas database. Render's
-free plan goes to sleep after 15 minutes without visitors, and the first visit after that takes
-about a minute. When people rely on it for live services, switch to Render's **Starter** plan
-($7/month), which never sleeps.
+**What it costs:** Render's **Starter** plan ($7/month per service, always on) plus the free MongoDB
+Atlas database. `render.yaml` asks for Starter. To try it for $0 first, pick **Free** instead when
+Render shows the plan: it works the same but sleeps after 15 minutes without visitors, and the
+first visit after that takes about a minute (not good during a live service).
 
 **What works on the website:** people and photos, schedules, the order of service (typed or
 Planning Center), dashboards and TV links, notes and checklists, comms on phones, YouTube/Facebook
