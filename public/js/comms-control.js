@@ -62,7 +62,7 @@ function renderJoin() {
   const statusText = {
     off: 'Off. Phones must be on the same Wi-Fi as this computer.',
     installing: 'Downloading the Cloudflare connector (first time only)…',
-    starting: 'Starting…',
+    starting: 'Connecting to Cloudflare… The link appears once it works (usually 5–20 seconds).',
     on: 'On. Phones can join from any network: Wi-Fi, hotspot or cellular.',
     error: `Not working: ${esc(rm.error || 'unknown error')}. Retrying…`,
   }[rm.status] || '';
