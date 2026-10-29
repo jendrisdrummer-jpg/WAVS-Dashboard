@@ -21,7 +21,12 @@ const meterListeners = new Set();
 let scheduled = false;
 
 /** Register a render function. Called (batched per animation frame) whenever state changes. */
-export function onRender(fn) { renderers.add(fn); }
+export function onRender(fn) {
+  renderers.add(fn);
+  // A page that registers after loading more data still draws now, even when nothing live is
+  // coming in (e.g. on the website with no gear connected).
+  if (store.ready) requestRender();
+}
 export function onMeters(fn) { meterListeners.add(fn); }
 
 export function requestRender() {
