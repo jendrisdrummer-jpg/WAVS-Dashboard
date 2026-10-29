@@ -501,7 +501,11 @@ Everyone gets their own sign-in, replacing the shared admin PIN:
 
 Viewing dashboards stays open on your network, so TVs and confidence monitors keep working. To make everyone sign in first, turn on **Require sign-in to view dashboards**. The comms phone page never needs an account: crew sign in to comms with their name.
 
-Forgotten password: an admin clicks **Reset password** and passes on the temporary password. People change their own password from their name in the top bar. Accounts, sessions and invites are stored in the data folder (`users.json`, `sessions.json`). Passwords are stored only as scrypt hashes.
+Forgotten password: with email set up (`GMAIL_USER` and `GMAIL_APP_PASSWORD`, see
+[docs/HOSTING.md](docs/HOSTING.md#password-reset-emails-gmail)), **Forgot password?** on the sign-in
+page emails a one-time link. Otherwise an admin clicks **Reset password** and passes on the temporary
+password. Locked out of the owner account: start once with `WAVS_RESET_OWNER_PASSWORD=<new password>`,
+sign in, then remove it. People change their own password from their name in the top bar. Accounts, sessions and invites are stored in the data folder (`users.json`, `sessions.json`). Passwords are stored only as scrypt hashes.
 
 ## On the web (accounts for everyone)
 

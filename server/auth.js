@@ -167,6 +167,52 @@ export class Auth {
     this.save();
   }
 
+  /** Set a new password without the old one (reset link, owner emergency reset); signs out everywhere. */
+  setPassword(userId, password) {
+    const u = this.user(userId);
+    if (!u) throw new Error('Unknown account');
+    u.pass = hashPassword(validPassword(password));
+    for (const [t, s] of Object.entries(this.sessions)) if (s.userId === userId) delete this.sessions[t];
+    this.save();
+    this.saveSessions();
+    return u;
+  }
+
+  // ---------------------------------------------------------------- forgot password
+
+  /**
+   * A one-time reset link for an account with this email. Returns { user, token } or null when
+   * there's no such account (the caller says the same thing either way, so nobody can find out
+   * which emails have accounts). Only the token's hash is kept; it lasts an hour, and asking
+   * again replaces it.
+   */
+  startReset(email, { minutes = 60 } = {}) {
+    const u = this.byName(email);
+    if (!u || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(u.username)) return null;
+    const token = crypto.randomBytes(24).toString('base64url');
+    const now = Date.now();
+    this.data.resets = Object.fromEntries(Object.entries(this.data.resets || {}).filter(([, r]) => r.expires > now && r.userId !== u.id));
+    this.data.resets[sha(token)] = { userId: u.id, expires: now + minutes * 60000 };
+    this.save();
+    return { user: u, token };
+  }
+
+  /** The account a reset link is for, or null if it's used, expired or made up. */
+  resetFor(token) {
+    const r = token && this.data.resets?.[sha(String(token))];
+    return r && r.expires > Date.now() ? this.user(r.userId) || null : null;
+  }
+
+  /** Use a reset link: new password, link used up, signed in. Returns a session token. */
+  finishReset(token, password) {
+    const u = this.resetFor(token);
+    if (!u) throw new Error('This reset link has expired or was already used. Ask for a new one.');
+    validPassword(password);
+    delete this.data.resets[sha(String(token))];
+    this.setPassword(u.id, password);
+    return this.startSession(u);
+  }
+
   setRequireLogin(on) {
     this.data.requireLogin = Boolean(on);
     this.save();

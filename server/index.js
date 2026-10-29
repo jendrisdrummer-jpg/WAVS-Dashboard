@@ -22,6 +22,7 @@ import { createBackup, readBackup, importBackup, isEncrypted } from './backup.js
 import { openDocs, FileDocs, MongoDocs, databaseConfig, saveDatabaseConfig, copyAll, hasSetup, mongoHost } from './docs.js';
 import { System } from './system.js';
 import { Site } from './site.js';
+import { Mailer, resetEmail } from './mail.js';
 
 // config.yaml now only holds server settings (port). Everything else (gear, branding, PIN,
 // Planning Center) is per organization and edited in the browser. On first run the
@@ -64,6 +65,21 @@ const orgs = new OrgRegistry({ docs }, { local: FileDocs.at(dataDir) });
 if (!HOSTED) await orgs.migrate(cfg);
 const auth = new Auth({ docs });
 const site = new Site({ docs });
+const mailer = new Mailer();
+if (mailer.enabled) console.log(`[mail] sending email as ${mailer.config.from}`);
+
+// Locked out of the owner account: start once with WAVS_RESET_OWNER_PASSWORD=<new password>
+// (Render: Environment), sign in with it, then remove the variable.
+if (process.env.WAVS_RESET_OWNER_PASSWORD) {
+  const owner = auth.data.users.find((u) => u.owner);
+  if (!owner) console.warn('[auth] WAVS_RESET_OWNER_PASSWORD is set, but there is no owner account yet');
+  else {
+    try {
+      auth.setPassword(owner.id, process.env.WAVS_RESET_OWNER_PASSWORD);
+      console.warn(`[auth] the owner's password (${owner.username}) was reset from WAVS_RESET_OWNER_PASSWORD. Sign in, then remove that variable.`);
+    } catch (e) { console.error(`[auth] WAVS_RESET_OWNER_PASSWORD: ${e.message}`); }
+  }
+}
 
 // ---------------------------------------------------------------- organizations running
 
@@ -217,7 +233,7 @@ app.use((req, _res, next) => {
 // Off-site (through the Cloudflare link, from any network): everyone signs in, whatever the
 // "require sign-in" setting, and accounts must exist. Only the sign-in pages, static files and
 // the comms phone page are open. The first (owner) account can only be made on this computer.
-const OFFSITE_OPEN = /^\/(login|join\/|api\/auth\/(status|login|logout|invite\/)|css\/|js\/|vendor\/|logo$|comms$|favicon)/;
+const OFFSITE_OPEN = /^\/(login|join\/|forgot$|reset\/|api\/auth\/(status|login|logout|invite\/|forgot$|reset\/)|css\/|js\/|vendor\/|logo$|comms$|favicon)/;
 app.use((req, res, next) => {
   if (!req.viaTunnel) return next();
   if (req.path === '/api/auth/owner') return res.status(403).json({ error: 'Create the first account on the dashboard computer itself, then sign in here.' });
@@ -249,7 +265,7 @@ const need = (role) => (req, res, next) => {
 // "Require sign-in to view" (always on the website): everything except the sign-in pages,
 // static files and the comms phone page (crew sign in to comms with their name) needs a
 // signed-in account. A TV link may look (GET), not change anything.
-const PUBLIC = /^\/(login|join\/|signup$|api\/auth\/|css\/|js\/|vendor\/|logo$|comms$|api\/comms\/qr\.svg$|favicon|tv\/)/;
+const PUBLIC = /^\/(login|join\/|signup$|forgot$|reset\/|api\/auth\/|css\/|js\/|vendor\/|logo$|comms$|api\/comms\/qr\.svg$|favicon|tv\/)/;
 const TV_CAN_READ = /^\/(api\/(config|state|dashboards|schedule|service|settings)$|uploads\/|d\/|dashboards$)/;
 app.use((req, res, next) => {
   if (!accountsOn() || !loginRequired() || PUBLIC.test(req.path)) return next();
@@ -299,7 +315,9 @@ app.post('/api/pin/check', need('admin'), (req, res) => res.json({ ok: true }));
 const signIn = (req, res, token) => res.append('set-cookie', sessionCookie(token, { secure: req.secure || Boolean(req.viaTunnel) }));
 /** Website: remember which organization this browser is working in. */
 const pickOrg = (req, res, id) => res.append('set-cookie', `wavs_org=${encodeURIComponent(id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${400 * 86400}${req.secure ? '; Secure' : ''}`);
-const clientIp = (req) => (req.viaTunnel && req.get('cf-connecting-ip')) || req.socket.remoteAddress || '';
+// The visitor's address (for "too many tries"). The website sits behind its host's proxy, so
+// there it's the forwarded address (trust proxy), not the proxy's own.
+const clientIp = (req) => (HOSTED && req.ip) || (req.viaTunnel && req.get('cf-connecting-ip')) || req.socket.remoteAddress || '';
 // What the sign-in page needs (public, even when sign-in is required to view).
 app.get('/api/auth/status', (req, res) => res.json({
   org: req.rt ? { name: req.rt.settings.org.name, theme: req.rt.settings.org.theme, logo: Boolean(orgs.logoKey(req.rt.orgId)) } : HOSTED ? { name: site.name, theme: {}, logo: false } : null,
@@ -307,6 +325,7 @@ app.get('/api/auth/status', (req, res) => res.json({
   pinRequired: !accountsOn() && Boolean(req.rt?.settings.security.adminPin),
   hosted: HOSTED,
   signups: HOSTED ? site.signups : null,
+  mail: mailer.enabled,
 }));
 
 // ---- website: anyone can sign up (open, with the beta code, or closed) and gets their own organization.
@@ -354,6 +373,45 @@ app.post('/api/auth/login', wrap((req, res) => {
   res.json({ ok: true });
 }));
 app.post('/api/auth/logout', (req, res) => { auth.logout(sessionToken(req)); signIn(req, res, null); res.json({ ok: true }); });
+// ---- forgot password: a one-time link by email (when email is set up, see mail.js)
+// Links use the site's own address, never one a request claims (Host), so a link can't be
+// pointed at someone else's server.
+const siteBase = (req) => (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || shareBase(req)).replace(/\/+$/, '');
+const forgotTries = new Map(); // ip or email -> { n, at }
+const tooManyForgot = (key) => {
+  const t = forgotTries.get(key);
+  const fresh = t && Date.now() - t.at < 3600000;
+  forgotTries.set(key, fresh ? { n: t.n + 1, at: t.at } : { n: 1, at: Date.now() });
+  return fresh && t.n >= 5;
+};
+app.post('/api/auth/forgot', wrap(async (req, res) => {
+  if (!mailer.enabled) throw new Error('Password reset by email isn\'t set up on this dashboard. Ask an admin to reset your password.');
+  const email = String(req.body?.username || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Enter the email address you sign in with');
+  if (tooManyForgot(clientIp(req)) || tooManyForgot(email)) throw new Error('Too many reset emails. Try again in an hour.');
+  const r = auth.startReset(email);
+  if (r) {
+    const link = `${siteBase(req)}/reset/${r.token}`;
+    try {
+      await mailer.send({ to: r.user.username, ...resetEmail({ name: r.user.name, link, site: HOSTED ? site.name : 'WAVS Dashboard' }) });
+    } catch (e) {
+      console.error(`[mail] couldn't send a reset email: ${e.message}`);
+      throw new Error('The email couldn\'t be sent right now. Try again in a few minutes, or ask an admin.');
+    }
+  }
+  // The same answer whether or not there's an account, so nobody can find out who has one.
+  res.json({ ok: true });
+}));
+app.get('/api/auth/reset/:token', (req, res) => {
+  const u = auth.resetFor(req.params.token);
+  if (!u) return res.status(404).json({ error: 'This reset link has expired or was already used. Ask for a new one.' });
+  res.json({ ok: true, name: u.name, username: u.username });
+});
+app.post('/api/auth/reset/:token', wrap((req, res) => {
+  signIn(req, res, auth.finishReset(req.params.token, req.body?.password));
+  res.json({ ok: true });
+}));
+
 app.post('/api/auth/password', wrap((req, res) => {
   if (!req.user) throw new Error('Sign in first');
   auth.changePassword(req.user.id, req.body?.current, req.body?.next);
@@ -838,7 +896,7 @@ const pages = {
   '/': 'home.html', '/welcome': 'welcome.html', '/dashboards': 'dashboard.html', '/d/:slug': 'dashboard.html', '/tv/:org/:dash': 'dashboard.html',
   '/greenroom': 'greenroom.html', '/rf': 'rf.html', '/admin': 'admin.html', '/people': 'people.html', '/schedule': 'schedule.html', '/gear': 'gear.html', '/settings': 'settings.html',
   '/comms': 'comms.html', '/comms/control': 'comms-control.html', '/comms/engine': 'comms-engine.html',
-  '/login': 'login.html', '/join/:code': 'login.html', '/signup': 'login.html',
+  '/login': 'login.html', '/join/:code': 'login.html', '/signup': 'login.html', '/forgot': 'login.html', '/reset/:token': 'login.html',
 };
 // Website: a TV link carries its organization's key; the TV keeps it (cookie) and can then show
 // that organization's dashboards without anyone signing in. Someone signed in just switches to it.

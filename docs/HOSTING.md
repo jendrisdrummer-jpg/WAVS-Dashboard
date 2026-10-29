@@ -67,9 +67,32 @@ Things for testers to know:
   without signing in, and can only view.
 - **Comms**: Comms → the QR code gives a link for their organization. Phones join from any network.
   The comms engine runs in a Chrome tab on any computer (Comms → engine).
-- **Forgotten passwords**: an admin can reset passwords for people who are only on their own team.
+- **Forgotten passwords**: once email is set up (below), **Forgot password?** on the sign-in page
+  emails a link. Without it, an admin can reset passwords for people who are only on their own team.
   You (the site owner) can reset anyone's.
 - **Up to 5 organizations per person** during the beta.
+
+## Password reset emails (Gmail)
+
+With email set up, the sign-in page has **Forgot password?**. Someone enters their email and
+gets a link to choose a new password. The link works once, for an hour. The site sends from a
+Gmail account. A separate one, such as `wavs.dashboard@gmail.com`, keeps it tidy, but yours works.
+
+1. In that Google account, turn on **2-Step Verification** (myaccount.google.com → Security).
+2. Go to **myaccount.google.com/apppasswords**, type a name (e.g. `WAVS Dashboard`) and click
+   **Create**. Copy the 16-letter password it shows. It's only shown once.
+3. In Render, open your service → **Environment → Edit** and add:
+   - `GMAIL_USER`: the Gmail address
+   - `GMAIL_APP_PASSWORD`: the 16-letter app password (the spaces don't matter)
+4. **Save, rebuild, and deploy**. The log then shows `[mail] sending email as …`.
+
+Gmail allows about 500 emails a day, plenty for a beta. Reset emails go only to accounts whose
+sign-in is an email address. Asking for a reset says the same thing whether or not the email
+has an account, and it's limited to 5 an hour.
+
+**Locked out of the owner account** (or email isn't set up)? In Render → Environment, add
+`WAVS_RESET_OWNER_PASSWORD` with a new password and save; the site restarts with it. Sign in,
+then **delete that variable** and save again.
 
 ## Bringing your own organization over from the laptop
 
